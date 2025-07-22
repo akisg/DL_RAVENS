@@ -16,6 +16,8 @@ affine = 'synthmorph'
 # deformable = 'synthmorph_cmd'
 deformable = 'synthmorph_vxm'
 
+SHOW_IMAGES = False
+
 
 # In[3]:
 
@@ -91,17 +93,19 @@ def normalize(x):
     return x[None, ..., None]
 
 def show(x, title=None):
-  x = np.squeeze(x)
-  fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-  i, j, k = (f // 2 for f in x.shape)
+    if not SHOW_IMAGES:
+        return
+    x = np.squeeze(x)
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    i, j, k = (f // 2 for f in x.shape)
 
-  slices = x[:, j, :], x[:, :, k], x[i, :, :].T
-  for x, ax in zip(slices, axes):
-    ax.imshow(x, cmap='gray')
-    ax.set_axis_off()
+    slices = x[:, j, :], x[:, :, k], x[i, :, :].T
+    for x, ax in zip(slices, axes):
+        ax.imshow(x, cmap='gray')
+        ax.set_axis_off()
 
-  if title:
-    axes[1].text(0.50, 1.05, title, ha='center', transform=axes[1].transAxes, size=14)
+    if title:
+        axes[1].text(0.50, 1.05, title, ha='center', transform=axes[1].transAxes, size=14)
 
 
 # In[10]:
@@ -111,12 +115,12 @@ def show(x, title=None):
 
 # ###### Do we need reshape? (or even resize?)
 
-# # high_vn_1 = sf.load_volume('/Volumes/home/mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz').resize(voxsize=2).reshape(target_shape).reorient('ILP')
-# high_vn_1 = sf.load_volume('../mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz').resize(voxsize=2).reorient('ILP')
+# # high_vn_1 = sf.load_volume('/Volumes/home/mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz').resize(voxsize=2).reshape(target_shape).reorient('LPS')
+# high_vn_1 = sf.load_volume('../mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz').resize(voxsize=2).reorient('LPS')
 # show(high_vn_1, title='Extremely High VN: 137_S_4227')
 
 # # Load, transform, and display the second high VN scan
-# high_vn_2 = sf.load_volume('../mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz').resize(voxsize=2).reorient('ILP')
+# high_vn_2 = sf.load_volume('../mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz').resize(voxsize=2).reorient('LPS')
 # show(high_vn_2, title='Extremely High VN: 013_S_4236')
 
 
@@ -124,11 +128,11 @@ def show(x, title=None):
 
 
 # # Load, transform, and display the first small VN scan
-# small_vn_1 = sf.load_volume('../mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz').resize(voxsize=2).reorient('ILP')
+# small_vn_1 = sf.load_volume('../mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz').resize(voxsize=2).reorient('LPS')
 # show(small_vn_1, title='Extremely Small VN: 019_S_6635')
 
 # # Load, transform, and display the second small VN scan
-# small_vn_2 = sf.load_volume('../mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz').resize(voxsize=2).reorient('ILP')
+# small_vn_2 = sf.load_volume('../mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz').resize(voxsize=2).reorient('LPS')
 # show(small_vn_2, title='Extremely Small VN: 072_S_4226')
 
 
@@ -136,11 +140,11 @@ def show(x, title=None):
 
 
 # # Load, transform, and display the first mean VN scan
-# mean_vn_1 = sf.load_volume('../mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz').resize(voxsize=2).reorient('ILP')
+# mean_vn_1 = sf.load_volume('../mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz').resize(voxsize=2).reorient('LPS')
 # show(mean_vn_1, title='Mean VN: 023_S_1247')
 
 # # Load, transform, and display the second mean VN scan
-# mean_vn_2 = sf.load_volume('../mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz').resize(voxsize=2).reorient('ILP')
+# mean_vn_2 = sf.load_volume('../mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz').resize(voxsize=2).reorient('LPS')
 # show(mean_vn_2, title='Mean VN: 027_S_0118')
 
 
@@ -155,10 +159,28 @@ def show(x, title=None):
 # In[14]:
 
 
-# Define your subjects and their paths
-subjects_list = ["subj1", "subj2"]  # Add more as needed
+# # Guray's Inverted Input Files and Template
+# subject_nifti_paths = {
+#     "subj1": "in/subj1/subj1_T1_LPS.nii.gz",
+#     "subj2": "in/subj2/subj2_T1_LPS.nii.gz",
+#     # Add more as needed
+# }
+# template_nifti_path = "template/colin27_t1_tal_lin_INV.nii.gz"
 
-template_path = "out_synth/template/colin27_t1_tal_lin_INV.nii.gz"  # Guray's Inverted Template
+
+# Yuhan's Input Files and Template
+subject_nifti_paths = {
+    "subj1": "../mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz",
+    "subj2": "../mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz",
+    # "subj3": "../mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz",
+    # "subj4": "../mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz",
+    # "subj5": "../mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz",
+    # "subj6": "../mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz",
+    # Add more as needed
+}
+template_nifti_path = "../mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
+
+# template_path = "out_synth/template/colin27_t1_tal_lin_INV.nii.gz"  # Guray's Inverted Template
 shape = (256, 256, 256)
 
 # Helper function to get all paths for a subject
@@ -448,7 +470,7 @@ import numpy as np
 
 
 
-for subj_id in subjects_list:
+for subj_id in subject_nifti_paths.keys():
     print(f"\n===== Processing subject: {subj_id} =====\n")
     paths = get_subject_paths(subj_id)
     subj1_path = paths["t1"]
@@ -462,6 +484,36 @@ for subj_id in subjects_list:
     ravens_path = paths["ravens"]
     ravens_scaled_path = paths["ravens_scaled"]
 
+    # --- Input original NIfTI paths and preprocess (resize/reshape/resample) ---
+    orig_subj_nii = subject_nifti_paths[subj_id]
+    orig_template_nii = template_nifti_path
+    preproc_subj_nii = f"out_synth/{subj_id}/init/{subj_id}_t1.nii.gz"
+    preproc_template_nii = "out_synth/template/colin27_t1_tal_lin_INV.nii.gz"
+
+    # Preprocess subject image
+    if not os.path.exists(preproc_subj_nii):
+        print(f"Preprocessing subject image for {subj_id} ...")
+        # subj_vol = sf.load_volume(orig_subj_nii).resize(voxsize=2).reshape(shape).reorient('LPS')
+        subj_vol = sf.load_volume(orig_subj_nii).reorient('LPS')
+        os.makedirs(os.path.dirname(preproc_subj_nii), exist_ok=True)
+        subj_vol.save(preproc_subj_nii)
+    else:
+        print(f"Preprocessed subject image exists: {preproc_subj_nii}")
+
+    # Preprocess template image
+    if not os.path.exists(preproc_template_nii):
+        print("Preprocessing template image ...")
+        # template_vol = sf.load_volume(orig_template_nii).resize(voxsize=2).reshape(shape).reorient('LPS')
+        template_vol = sf.load_volume(orig_template_nii).reorient('LPS')
+        os.makedirs(os.path.dirname(preproc_template_nii), exist_ok=True)
+        template_vol.save(preproc_template_nii)
+    else:
+        print(f"Preprocessed template image exists: {preproc_template_nii}")
+
+    # Update paths for downstream steps
+    subj1_path = preproc_subj_nii
+    template_path = preproc_template_nii
+
     # --- Segmentation with SynthSeg (template and subject) ---
     import utils_mri as utilmri
     NUMTHD = 4
@@ -470,24 +522,25 @@ for subj_id in subjects_list:
         (f"template", template_path, f"out_synth/template/"),
         (subj_id, subj1_path, f"out_synth/{subj_id}/init/")
     ]
-    for tmp_id, tmp_img, out_base in seg_targets:
-        # Reorient images
-        print(f'Reorienting image for {tmp_id} ...')
-        out_reorient = os.path.join(out_base, f'{tmp_id}_T1_LPS.nii.gz')
-        if not os.path.exists(out_reorient):
-            if not os.path.exists(out_base):
-                os.makedirs(out_base)
-            utilmri.reorient_img(tmp_img, 'LPS', out_reorient)
-        else:
-            print(f'Out file exists, skip: {out_reorient}')
+    for cur_id, cur_img, out_base in seg_targets:
+        # # Reorient images
+        # print(f'Reorienting image for {cur_id} ...')
+        # out_reorient = os.path.join(out_base, f'{cur_id}_T1_LPS.nii.gz')
+        # if not os.path.exists(out_reorient):
+        #     if not os.path.exists(out_base):
+        #         os.makedirs(out_base)
+        #     utilmri.reorient_img(cur_img, 'LPS', out_reorient)
+        # else:
+        #     print(f'Out file exists, skip: {out_reorient}')
+
         # Segment image
-        print(f'Segmenting image for {tmp_id} ...')
-        out_seg = os.path.join(out_base, f'{tmp_id}_t1_seg.nii.gz')
-        out_qc = os.path.join(out_base, f'{tmp_id}_t1_Seg_QC.csv')
-        out_vol = os.path.join(out_base, f'{tmp_id}_t1_Seg_Vol.csv')
-        out_post = os.path.join(out_base, f'{tmp_id}_t1_Seg_Post.nii.gz')
-        out_resample = os.path.join(out_base, f'{tmp_id}_t1_Seg_Resample.nii.gz')
-        cmd = f'mri_synthseg --i {out_reorient} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --resample {out_resample} --threads {NUMTHD} --cpu'
+        print(f'Segmenting image for {cur_id} ...')
+        out_seg = os.path.join(out_base, f'{cur_id}_t1_seg.nii.gz')
+        out_qc = os.path.join(out_base, f'{cur_id}_t1_Seg_QC.csv')
+        out_vol = os.path.join(out_base, f'{cur_id}_t1_Seg_Vol.csv')
+        out_post = os.path.join(out_base, f'{cur_id}_t1_Seg_Post.nii.gz')
+        out_resample = os.path.join(out_base, f'{cur_id}_t1_Seg_Resample.nii.gz')
+        cmd = f'mri_synthseg --i {cur_img} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --resample {out_resample} --threads {NUMTHD} --cpu'
         if not os.path.exists(out_seg):
             print(f'About to run: {cmd}')
             os.system(cmd)
@@ -496,8 +549,9 @@ for subj_id in subjects_list:
 
     # Now use the subject's segmentation output for downstream steps
     out_seg = os.path.join(f"out_synth/{subj_id}/init/", f"{subj_id}_t1_seg.nii.gz")
-    t1_seg = sf.load_volume(out_seg).reshape(shape).reorient('ILP')
-    show(t1_seg, title=f'Segmented T1-weighted MRI ({subj_id})')
+    t1_seg = sf.load_volume(out_seg).reshape(shape).reorient('LPS')
+    if SHOW_IMAGES:
+        show(t1_seg, title=f'Segmented T1-weighted MRI ({subj_id})')
 
 
 
@@ -513,13 +567,16 @@ for subj_id in subjects_list:
     csf_mask_nii = nib.Nifti1Image(mask_data, affine_matrix)
     nib.save(csf_mask_nii, output_filename)
     print(f"Binary mask saved to: {output_filename}")
-    temp1 = sf.load_volume(output_filename).reshape(shape).reorient('ILP')
-    show(temp1, title=f'Binary mask ({subj_id})')
+    temp1 = sf.load_volume(output_filename).reshape(shape).reorient('LPS')
+    if SHOW_IMAGES:
+        show(temp1, title=f'Binary mask ({subj_id})')
 
     # --- Affine Registration ---
     affine_moving = subj1_path
     affine_fixed = template_path
     if affine == 'synthmorph':
+        # Ensure output directory exists for the transform file
+        os.makedirs(os.path.dirname(matrix_filepath), exist_ok=True)
         # Estimate and save an affine transform trans.lta in FreeSurfer LTA format
         cmd1 = f'mri_synthmorph register -m affine -t {matrix_filepath} {affine_moving} {affine_fixed}'
         # Apply an existing transform to an image
@@ -584,39 +641,47 @@ for subj_id in subjects_list:
     print(f"\nCalculated Scale Factor: {actual_scale_factor:.4f} mm³")
 
     # --- Deformable Registration ---
-    t1_fixed = sf.load_volume(affine_fixed).reshape(shape).reorient('ILP')
+    t1_fixed = sf.load_volume(affine_fixed).reshape(shape).reorient('LPS')
     t1_moving = sf.load_volume(affine_moved).resample_like(t1_fixed)
-    show(t1_fixed, title=f'Fixed T1-weighted MRI ({subj_id})')
-    show(t1_moving, title=f'Moving T1-weighted MRI ({subj_id})')
+    if SHOW_IMAGES:
+        show(t1_fixed, title=f'Fixed T1-weighted MRI ({subj_id})')
+        show(t1_moving, title=f'Moving T1-weighted MRI ({subj_id})')
     moving = normalize(t1_moving)
     fixed = normalize(t1_fixed)
     trans = model.predict((moving, fixed))
     moved = vxm.layers.SpatialTransformer(fill_value=0)((moving, trans))
-    show(t1_moving, title=f'Moving T1-weighted MRI ({subj_id})')
-    show(moved, title=f'Moved T1-weighted MRI ({subj_id})')
-    show(fixed, title=f'Fixed T1-weighted MRI ({subj_id})')
-    show(moved - fixed, title=f'Difference after registration 1 ({subj_id})')
+    if SHOW_IMAGES:
+        show(t1_moving, title=f'Moving T1-weighted MRI ({subj_id})')
+        show(moved, title=f'Moved T1-weighted MRI ({subj_id})')
+        show(fixed, title=f'Fixed T1-weighted MRI ({subj_id})')
+        show(moved - fixed, title=f'Difference after registration 1 ({subj_id})')
 
     # --- Deformable Registration of Segmented Image ---
-    t1_fixed_seg = sf.load_volume('out_synth/template/colin27_t1_tal_lin_T1_LPS_dlicv_seg.nii.gz').reshape(shape).reorient('ILP')
+    # Define the template segmentation path based on the segmentation step
+    template_seg_path = os.path.join("out_synth/template/", "template_t1_seg.nii.gz")
+    t1_fixed_seg = sf.load_volume(template_seg_path).reshape(shape).reorient('LPS')
     t1_moving_seg = sf.load_volume(seg_affine_moved).resample_like(t1_fixed_seg)
     before = normalize(t1_moving_seg) - normalize(t1_fixed_seg)
-    show(t1_moving_seg, title=f'Moving Registered T1-weighted MRI ({subj_id})')
-    show(t1_fixed_seg, title=f'Fixed Registered T1-weighted MRI ({subj_id})')
-    show(before, title=f'Difference before Segmented registration ({subj_id})')
+    if SHOW_IMAGES:
+        show(t1_moving_seg, title=f'Moving Registered T1-weighted MRI ({subj_id})')
+        show(t1_fixed_seg, title=f'Fixed Registered T1-weighted MRI ({subj_id})')
+        show(before, title=f'Difference before Segmented registration ({subj_id})')
 
     # --- Apply Deformation Field to Segmented Image ---
     moving_seg = normalize(t1_moving_seg)
     fixed_seg = normalize(t1_fixed_seg)
     moved_seg = vxm.layers.SpatialTransformer(interp_method='nearest', fill_value=0)((moving_seg, trans))
-    show(moved_seg, title=f'Moved T1-weighted MRI ({subj_id})')
-    show(fixed_seg, title=f'Fixed T1-weighted MRI ({subj_id})')
-    show(moved_seg - fixed_seg, title=f'Difference after Segmented registration ({subj_id})')
+    if SHOW_IMAGES:
+        show(moved_seg, title=f'Moved T1-weighted MRI ({subj_id})')
+        show(fixed_seg, title=f'Fixed T1-weighted MRI ({subj_id})')
+        show(moved_seg - fixed_seg, title=f'Difference after Segmented registration ({subj_id})')
+    os.makedirs(os.path.dirname(def_moved), exist_ok=True)
     t1_fixed.new(moved_seg[0]).save(def_moved)
 
     # --- Calculate Jacobian Matrix of the Deformation ---
     jacobian_det = vxm.py.utils.jacobian_determinant(trans[0])
-    show(jacobian_det, title=f'Jacobian Determinant of the Transformation ({subj_id})')
+    if SHOW_IMAGES:
+        show(jacobian_det, title=f'Jacobian Determinant of the Transformation ({subj_id})')
     t1_fixed.new(jacobian_det).save(jac_det_path)
 
     # --- Calculate Ravens Map ---
@@ -638,9 +703,10 @@ for subj_id in subjects_list:
 
     # --- Show RAVENS Maps ---
     t1_rav = sf.load_volume(ravens_path)
-    show(t1_rav, title=f'RAVENS Map ({subj_id})')
-    t1_rav = sf.load_volume(ravens_scaled_path)
-    show(t1_rav, title=f'RAVENS Map Scaled ({subj_id})')
+    if SHOW_IMAGES:
+        show(t1_rav, title=f'RAVENS Map ({subj_id})')
+        t1_rav = sf.load_volume(ravens_scaled_path)
+        show(t1_rav, title=f'RAVENS Map Scaled ({subj_id})')
 
     # --- Print Sums for Debugging ---
     print(f"The volume of the original mask is: {volume_2}")
