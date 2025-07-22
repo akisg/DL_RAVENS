@@ -360,8 +360,9 @@ def calculate_physical_volume_change(
 import nibabel as nib
 import numpy as np
 from pathlib import Path
+from typing import Union
 
-def calculate_nifti_volume(filepath: str | Path, verbose: bool = False) -> float:
+def calculate_nifti_volume(filepath: Union[str, Path], verbose: bool = False) -> float:
     """
     Calculates the total volume of non-zero voxels in a NIfTI file.
 
