@@ -3,35 +3,40 @@
 
 # In[1]:
 
+# Input Images
 
-# !rm -rf output/*
+# # # Guray's Inverted Input Files and Template
+# subject_nifti_paths = {
+#     "subj1": "inverted/in/subj1/subj1_T1_LPS.nii.gz",
+#     # "subj2": "inverted/in/subj2/subj2_T1_LPS.nii.gz",
+#     # Add more as needed
+# }
+# template_nifti_path = "inverted/template/colin27_t1_tal_lin_INV.nii.gz"
+
+
+# Yuhan's Input Files and Template
+subject_nifti_paths = {
+    "subj1": "mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz", # extremely high VN scan
+    "subj2": "mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz", # extremely high VN scan
+    "subj3": "mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz", # extremely small VN scan
+    "subj4": "mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz", # extremely small VN scan
+    "subj5": "mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz", # mean VN scan
+    "subj6": "mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz", # mean VN scan
+}
+template_nifti_path = "mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
 
 # In[2]:
 
-affine = 'synthmorph'
+affine = 'synthmorph_freesurfer'
 # affine = 'flirt'
 # affine = 'itk'
 
-# deformable = 'synthmorph_cmd'
-deformable = 'synthmorph_vxm'
+# deformable = 'synthmorph_freesurfer'
+deformable = 'synthmorph_voxelmorph'
 
 SHOW_IMAGES = False
 
-
-# In[3]:
-
-
-# Clone Guray's repo
-# !rm -rf SingleScanAnalysis
-
-# !git clone https://github.com/gurayerus/SingleScanAnalysis.git
-# !cp SingleScanAnalysis/test/input/* .
-# !cp SingleScanAnalysis/src/pipeline_dl/utils_mri.py .
-
-# Skull stripped images
-# !cp SingleScanAnalysis/src/pipeline_istag/RAVENS_Pipeline_Simple/input/Subj1/Subj1_T1_LPS_dlicv.nii.gz .
-# !cp SingleScanAnalysis/src/pipeline_istag/RAVENS_Pipeline_Simple/templates/colin27_t1_tal_lin.nii.gz .
 
 
 # In[4]:
@@ -41,6 +46,11 @@ SHOW_IMAGES = False
 # !pip -q install git+https://github.com/adalca/neurite.git@0776a575eadc3d10d6851a4679b7a305f3a31c65
 # !pip -q install git+https://github.com/freesurfer/surfa.git@ec5ddb193fd1caf22ec654c457b5678f6bd8e460
 # !pip -q install git+https://github.com/voxelmorph/voxelmorph.git@2cd706189cb5919c6335f34feec672f05203e36b
+# !pip -q install nilearn
+
+# Download models
+# !curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/shapes-dice-vel-3-res-8-16-32-256f.h5
+# !curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/brains-dice-vel-0.5-res-16-256f.h5
 
 
 # In[5]:
@@ -51,13 +61,6 @@ SHOW_IMAGES = False
 
 # get_ipython().system('pip show tensorflow')
 # get_ipython().system('pip show keras')
-# !conda env list
-
-
-# In[6]:
-
-
-# !pip -q install nilearn
 
 
 # In[7]:
@@ -71,19 +74,11 @@ import tensorflow as tf
 import voxelmorph as vxm
 import matplotlib.pyplot as plt
 import pandas as pd
-# import json
 import os
-# import argparse
 import nibabel as nib
 import numpy as np
 
 
-
-# In[8]:
-
-
-# Downloads.
-# !curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/shapes-dice-vel-3-res-8-16-32-256f.h5
 
 
 # In[9]:
@@ -91,8 +86,9 @@ import numpy as np
 
 # Helper functions. The shape has to be divisible by 16.
 # shape = (128, 128, 128)
-shape = (256, 256, 256)
 # shape = (160, 192, 160)
+
+shape = (256, 256, 256)
 
 def normalize(x):
     x = np.float32(x)
@@ -117,28 +113,6 @@ def show(x, title=None):
 
 
 
-# In[10]:
-
-
-# # # Guray's Inverted Input Files and Template
-# subject_nifti_paths = {
-#     "subj1": "in/subj1/subj1_T1_LPS.nii.gz",
-#     # "subj2": "in/subj2/subj2_T1_LPS.nii.gz",
-#     # Add more as needed
-# }
-# template_nifti_path = "template/colin27_t1_tal_lin_INV.nii.gz"
-
-
-# Yuhan's Input Files and Template
-subject_nifti_paths = {
-    "subj1": "../mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz", # extremely high VN scan
-    "subj2": "../mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz", # extremely high VN scan
-    "subj3": "../mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz", # extremely small VN scan
-    "subj4": "../mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz", # extremely small VN scan
-    "subj5": "../mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz", # mean VN scan
-    "subj6": "../mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz", # mean VN scan
-}
-template_nifti_path = "../mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
 # In[11]:
 
@@ -159,7 +133,7 @@ def get_subject_paths(subj_id):
         "t1_seg_def_reg": def_reg + f"{subj_id}_t1_seg_def_reg.nii.gz",
         "jac_det": def_reg + f"{subj_id}_jac_det.nii.gz",
         "ravens": def_reg + f"{subj_id}_t1_RAVENS.nii.gz",
-        "ravens_scaled": def_reg + f"{subj_id}_t1_RAVENS_scaled.nii.gz",
+        "ravens_temp": def_reg + f"{subj_id}_t1_RAVENS_temp.nii.gz",
     }
 
 # In[12]:
@@ -383,9 +357,6 @@ def calculate_nifti_volume(filepath: Union[str, Path], verbose: bool = False) ->
 
 # In[16]:
 
-
-# Shapes model. Assumes affine initialization and may require fine tuning.
-
 print(f"The shape variable is: {shape}, and its type is: {type(shape)}")
 
 
@@ -398,8 +369,13 @@ model = vxm.networks.VxmDense(
   )
 model = tf.keras.Model(model.inputs, model.references.pos_flow)
 
-model.load_weights('shapes-dice-vel-3-res-8-16-32-256f.h5')
-# model.load_weights('synthmorph.deform.3.h5')
+
+
+# "shapes" variant of SynthMorph, which is trained on images synthesized from random shapes only
+# model.load_weights('shapes-dice-vel-3-res-8-16-32-256f.h5')
+
+# "brains" variant of SynthMorph, which is trained on images synthesized from brain label maps
+model.load_weights('brains-dice-vel-0.5-res-16-256f.h5')
 
 
 # In[17]:
@@ -419,7 +395,7 @@ for subj_id in subject_nifti_paths.keys():
     seg_def_moved = paths["t1_seg_def_reg"]
     jac_det_path = paths["jac_det"]
     ravens_path = paths["ravens"]
-    ravens_scaled_path = paths["ravens_scaled"]
+    ravens_temp_path = paths["ravens_temp"]
 
     # --- Input original NIfTI paths and preprocess (resize/reshape/resample) ---
     orig_subj_nii = subject_nifti_paths[subj_id]
@@ -499,7 +475,7 @@ for subj_id in subject_nifti_paths.keys():
     # --- Affine Registration ---
     affine_moving = subj1_path
     affine_fixed = template_path
-    if affine == 'synthmorph':
+    if affine == 'synthmorph_freesurfer':
         # Ensure output directory exists for the transform file
         os.makedirs(os.path.dirname(matrix_filepath), exist_ok=True)
         # Estimate and save an affine transform trans.lta in FreeSurfer LTA format
@@ -526,7 +502,7 @@ for subj_id in subject_nifti_paths.keys():
 
     # --- Apply the affine step to the segmentation ---
     seg_affine_moving = output_filename
-    if affine == 'synthmorph':
+    if affine == 'synthmorph_freesurfer':
         cmd = f'mri_synthmorph apply -m nearest {matrix_filepath} {seg_affine_moving} {seg_affine_moved}'
         if not os.path.exists(seg_affine_moved):
             print(f'About to run: {cmd}')
@@ -542,7 +518,7 @@ for subj_id in subject_nifti_paths.keys():
             print(f'Out file exists, skip: {seg_affine_moved}')
 
     # --- Calculate Scale Factor for the Affine Registration ---
-    if affine == "synthmorph":
+    if affine == "synthmorph_freesurfer":
         lta_matrix = parse_freesurfer_lta_file(matrix_filepath)
         if lta_matrix is not None:
             scale_factor = calculate_volume_change_from_matrix(lta_matrix)
@@ -565,8 +541,8 @@ for subj_id in subject_nifti_paths.keys():
     actual_scale_factor = volume_1 / volume_2
     print(f"\nCalculated Scale Factor: {actual_scale_factor:.4f} mm³")
 
-    # --- Deformable Registration using the SynthMorph Command Line Interface ---
-    if deformable == 'synthmorph_cmd':
+    # --- Deformable Registration using the SynthMorph Freesurfer Command Line Interface ---
+    if deformable == 'synthmorph_freesurfer':
         # Ensure output directory exists for the transform file
         os.makedirs(os.path.dirname(def_field), exist_ok=True)
 
@@ -592,21 +568,11 @@ for subj_id in subject_nifti_paths.keys():
         
         # Calculate the Jacobian determinant of the deformation field
         def_field_data = np.squeeze(def_field_data)  # Remove singleton dimensions if present
-        jacobian_det = vxm.py.utils.jacobian_determinant(def_field_data)
-        print(f"Jacobian determinant shape: {jacobian_det.shape}")
-        print(f"Jacobian determinant type: {jacobian_det.dtype}")
-        print(f"Jacobian determinant min: {jacobian_det.min()}")
-        print(f"Jacobian determinant max: {jacobian_det.max()}")
-
-        # Save the Jacobian determinant to a file
-        jac_det_nii = nib.Nifti1Image(jacobian_det, affine_matrix)
-        nib.save(jac_det_nii, jac_det_path)
-        print(f"Jacobian determinant saved to: {jac_det_path}")
         
 
 
     # --- Deformable Registration using the SynthMorph VoxelMorph Interface ---
-    elif deformable == 'synthmorph_vxm':
+    elif deformable == 'synthmorph_voxelmorph':
         t1_fixed = sf.load_volume(affine_fixed).reshape(shape).reorient('LPS')
         t1_moving = sf.load_volume(affine_moved).resample_like(t1_fixed)
         if SHOW_IMAGES:
@@ -644,16 +610,24 @@ for subj_id in subject_nifti_paths.keys():
         os.makedirs(os.path.dirname(seg_def_moved), exist_ok=True)
         t1_fixed.new(moved_seg[0]).save(seg_def_moved)
 
-        # --- Calculate Jacobian Matrix of the Deformation ---
-        jacobian_det = vxm.py.utils.jacobian_determinant(trans[0])
-        print(f"trans[0] shape: {trans[0].shape}")
-        print(f"Jacobian determinant shape: {jacobian_det.shape}")
-        print(f"Jacobian determinant type: {jacobian_det.dtype}")
-        print(f"Jacobian determinant min: {jacobian_det.min()}")
-        print(f"Jacobian determinant max: {jacobian_det.max()}")
-        if SHOW_IMAGES:
-            show(jacobian_det, title=f'Jacobian Determinant of the Transformation ({subj_id})')
-        t1_fixed.new(jacobian_det).save(jac_det_path)
+        # Save the deformation field data
+        def_field_data = trans[0]
+        print(f"Def_field data shape: {def_field_data.shape}")
+        print(f"Def_field data type: {def_field_data.dtype}")
+        print(f"Def_field data min: {def_field_data.min()}")
+        print(f"Def_field data max: {def_field_data.max()}")
+
+    # Calculate the Jacobian determinant of the deformation field
+    jacobian_det = vxm.py.utils.jacobian_determinant(def_field_data)
+    print(f"Jacobian determinant shape: {jacobian_det.shape}")
+    print(f"Jacobian determinant type: {jacobian_det.dtype}")
+    print(f"Jacobian determinant min: {jacobian_det.min()}")
+    print(f"Jacobian determinant max: {jacobian_det.max()}")
+
+    # Save the Jacobian determinant to a file
+    jac_det_nii = nib.Nifti1Image(jacobian_det, affine_matrix)
+    nib.save(jac_det_nii, jac_det_path)
+    print(f"Jacobian determinant saved to: {jac_det_path}")
 
     # --- Calculate Ravens Map ---
     def calc_ravens(f_jac, f_seg, labels, f_out):
@@ -663,45 +637,43 @@ for subj_id in subject_nifti_paths.keys():
         nii_seg_data = nii_seg.get_fdata()
         ravens = img_jac * nii_seg_data
         nii_out = nib.Nifti1Image(ravens, nii_jac.affine)
-        nib.save(nii_out, f_out)
-        print(f"RAVENS map saved to: {f_out}")
+        nib.save(nii_out, ravens_temp_path)
+        print(f"Temp RAVENS map saved to: {ravens_temp_path}")
         ravens /= scale_factor
         nii_out = nib.Nifti1Image(ravens, nii_jac.affine)
-        nib.save(nii_out, ravens_scaled_path)
-        print(f"RAVENS map saved to: {ravens_scaled_path}")
+        nib.save(nii_out, f_out)
+        print(f"RAVENS map saved to: {f_out}")
 
     calc_ravens(jac_det_path, seg_def_moved, target_labels, ravens_path)
 
     # --- Show RAVENS Maps ---
-    t1_rav = sf.load_volume(ravens_path)
     if SHOW_IMAGES:
+        t1_rav = sf.load_volume(ravens_path)
         show(t1_rav, title=f'RAVENS Map ({subj_id})')
-        t1_rav = sf.load_volume(ravens_scaled_path)
-        show(t1_rav, title=f'RAVENS Map Scaled ({subj_id})')
 
     # --- Print Sums for Debugging ---
-    print(f"The volume of the original mask is: {volume_2}")
-
-    nii_file = nib.load(ravens_scaled_path)
-    data = nii_file.get_fdata()
-    total_sum = np.sum(data)
-    print(f"The sum of the values in RAVENS after scaling is: {total_sum}")
+    print(f"\nThe volume of the original mask is: {volume_2}")
 
     nii_file = nib.load(ravens_path)
     data = nii_file.get_fdata()
     total_sum = np.sum(data)
-    print(f"The sum of the values in temp RAVENS is: {total_sum}")
+    print(f"The sum of the values in the final RAVENS map is: {total_sum}")
 
-    nii_file = nib.load(out_seg)
-    data = nii_file.get_fdata()
-    voxel_count = np.count_nonzero(np.isin(data, target_labels))
-    print(f"The number of voxels with a value of X in the Original Image is: {voxel_count}")
-    nii_file = nib.load(output_filename)
-    data = nii_file.get_fdata()
-    total_sum = np.sum(data)
-    print(f"The sum of the values in Original MASK is: {total_sum}")
-    nii_file = nib.load(output_filename)
-    data = nii_file.get_fdata()
-    voxel_count = np.count_nonzero(data)
-    print(f"The count of the values in Original mask is: {voxel_count}")
+    # nii_file = nib.load(ravens_temp_path)
+    # data = nii_file.get_fdata()
+    # total_sum = np.sum(data)
+    # print(f"The sum of the values in temp RAVENS is: {total_sum}")
+
+    # nii_file = nib.load(out_seg)
+    # data = nii_file.get_fdata()
+    # voxel_count = np.count_nonzero(np.isin(data, target_labels))
+    # print(f"The number of voxels with a value of X in the Original Image is: {voxel_count}")
+    # nii_file = nib.load(output_filename)
+    # data = nii_file.get_fdata()
+    # total_sum = np.sum(data)
+    # print(f"The sum of the values in Original MASK is: {total_sum}")
+    # nii_file = nib.load(output_filename)
+    # data = nii_file.get_fdata()
+    # voxel_count = np.count_nonzero(data)
+    # print(f"The count of the values in Original mask is: {voxel_count}")
 
