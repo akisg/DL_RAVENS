@@ -1,45 +1,37 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
-
 # Input Images
 
 # # # Guray's Inverted Input Files and Template
 # subject_nifti_paths = {
-#     "subj1": "inverted/in/subj1/subj1_T1_LPS.nii.gz",
-#     # "subj2": "inverted/in/subj2/subj2_T1_LPS.nii.gz",
+#     "subj1": "../inputs/inverted/in/subj1/subj1_T1_LPS.nii.gz",
+#     # "subj2": "../inputs/inverted/in/subj2/subj2_T1_LPS.nii.gz",
 #     # Add more as needed
 # }
-# template_nifti_path = "inverted/template/colin27_t1_tal_lin_INV.nii.gz"
+# template_nifti_path = "../inputs/inverted/template/colin27_t1_tal_lin_INV.nii.gz"
 
 
 # Yuhan's Input Files and Template
 subject_nifti_paths = {
-    "subj1": "mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz", # extremely high VN scan
-    "subj2": "mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz", # extremely high VN scan
-    "subj3": "mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz", # extremely small VN scan
-    "subj4": "mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz", # extremely small VN scan
-    "subj5": "mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz", # mean VN scan
-    "subj6": "mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz", # mean VN scan
+    "subj1": "../inputs/mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz", # extremely high VN scan
+    # "subj2": "../inputs/mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz", # extremely high VN scan
+    # "subj3": "../inputs/mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz", # extremely small VN scan
+    # "subj4": "../inputs/mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz", # extremely small VN scan
+    # "subj5": "../inputs/mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz", # mean VN scan
+    # "subj6": "../inputs/mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz", # mean VN scan
 }
-template_nifti_path = "mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
+template_nifti_path = "../inputs/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
-
-# In[2]:
 
 affine = 'synthmorph_freesurfer'
 # affine = 'flirt'
-# affine = 'itk'
 
 # deformable = 'synthmorph_freesurfer'
 deformable = 'synthmorph_voxelmorph'
 
 SHOW_IMAGES = False
 
-
-
-# In[4]:
 
 
 # # Packages from GitHub.
@@ -53,17 +45,11 @@ SHOW_IMAGES = False
 # !curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/brains-dice-vel-0.5-res-16-256f.h5
 
 
-# In[5]:
-
-
 # !pip install tensorflow==2.18
 # !pip install keras==3.08
 
 # get_ipython().system('pip show tensorflow')
 # get_ipython().system('pip show keras')
-
-
-# In[7]:
 
 
 import numpy as np
@@ -79,9 +65,9 @@ import nibabel as nib
 import numpy as np
 
 
-
-
-# In[9]:
+# Read environment variable for Freesurfer Prefix on Cubic
+freesurfer_prefix = os.getenv('FREESURFERSIF', '')
+print(f"The value of $FREESURFERSIF is: {freesurfer_prefix}.")
 
 
 # Helper functions. The shape has to be divisible by 16.
@@ -114,8 +100,6 @@ def show(x, title=None):
 
 
 
-# In[11]:
-
 # Helper function to get all paths for a subject
 def get_subject_paths(subj_id):
     base = f"out_synth/{subj_id}/init/"
@@ -136,8 +120,6 @@ def get_subject_paths(subj_id):
         "ravens_temp": def_reg + f"{subj_id}_t1_RAVENS_temp.nii.gz",
     }
 
-# In[12]:
-
 # Labels for segmentation
 
 # Cerebrospinal Fluid (CSF)
@@ -151,9 +133,6 @@ white_matter_labels = [2, 7, 41, 46]
 
 # Background
 background_label = [0]
-
-
-# In[13]:
 
 
 def calculate_volume_change_from_matrix(matrix: np.ndarray) -> float:
@@ -219,8 +198,6 @@ def parse_freesurfer_lta_file(filepath: str) -> np.ndarray:
         print(f"An unexpected error occurred with {filepath}: {e}")
         return None
 
-
-# In[14]:
 
 def calculate_physical_volume_change(
     flirt_matrix: np.ndarray,
@@ -288,8 +265,6 @@ def calculate_physical_volume_change(
 
 # ## Validate Scale Factor Value from the actual data
 
-# In[15]:
-
 from pathlib import Path
 from typing import Union
 
@@ -355,8 +330,6 @@ def calculate_nifti_volume(filepath: Union[str, Path], verbose: bool = False) ->
 
 
 
-# In[16]:
-
 print(f"The shape variable is: {shape}, and its type is: {type(shape)}")
 
 
@@ -376,9 +349,6 @@ model = tf.keras.Model(model.inputs, model.references.pos_flow)
 
 # "brains" variant of SynthMorph, which is trained on images synthesized from brain label maps
 model.load_weights('brains-dice-vel-0.5-res-16-256f.h5')
-
-
-# In[17]:
 
 
 for subj_id in subject_nifti_paths.keys():
@@ -432,7 +402,7 @@ for subj_id in subject_nifti_paths.keys():
     template_path = preproc_template_nii
 
     # --- Segmentation with SynthSeg (template and subject) ---
-    NUMTHD = 4
+    NUMTHD = 8
     # For each subject, segment both the template and the subject's T1 image
     seg_targets = [
         (f"template", template_path, f"out_synth/template/"),
@@ -446,7 +416,7 @@ for subj_id in subject_nifti_paths.keys():
         out_vol = os.path.join(out_base, f'{cur_id}_t1_Seg_Vol.csv')
         out_post = os.path.join(out_base, f'{cur_id}_t1_Seg_Post.nii.gz')
         out_resample = os.path.join(out_base, f'{cur_id}_t1_Seg_Resample.nii.gz')
-        cmd = f'mri_synthseg --i {cur_img} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --resample {out_resample} --threads {NUMTHD} --cpu'
+        cmd = f'{freesurfer_prefix} mri_synthseg --i {cur_img} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --resample {out_resample} --threads {NUMTHD} --cpu'
         if not os.path.exists(out_seg):
             print(f'About to run: {cmd}')
             os.system(cmd)
@@ -479,9 +449,9 @@ for subj_id in subject_nifti_paths.keys():
         # Ensure output directory exists for the transform file
         os.makedirs(os.path.dirname(matrix_filepath), exist_ok=True)
         # Estimate and save an affine transform trans.lta in FreeSurfer LTA format
-        cmd1 = f'mri_synthmorph register -m affine -t {matrix_filepath} {affine_moving} {affine_fixed}'
+        cmd1 = f'{freesurfer_prefix} mri_synthmorph register -m affine -t {matrix_filepath} {affine_moving} {affine_fixed}'
         # Apply an existing transform to an image
-        cmd2 = f'mri_synthmorph apply {matrix_filepath} {affine_moving} {affine_moved}'
+        cmd2 = f'{freesurfer_prefix} mri_synthmorph apply {matrix_filepath} {affine_moving} {affine_moved}'
         if not os.path.exists(affine_moved):
             print(f'About to run: {cmd1}')
             os.system(cmd1)
@@ -503,7 +473,7 @@ for subj_id in subject_nifti_paths.keys():
     # --- Apply the affine step to the segmentation ---
     seg_affine_moving = output_filename
     if affine == 'synthmorph_freesurfer':
-        cmd = f'mri_synthmorph apply -m nearest {matrix_filepath} {seg_affine_moving} {seg_affine_moved}'
+        cmd = f'{freesurfer_prefix} mri_synthmorph apply -m nearest {matrix_filepath} {seg_affine_moving} {seg_affine_moved}'
         if not os.path.exists(seg_affine_moved):
             print(f'About to run: {cmd}')
             os.system(cmd)
@@ -546,9 +516,9 @@ for subj_id in subject_nifti_paths.keys():
         # Ensure output directory exists for the transform file
         os.makedirs(os.path.dirname(def_field), exist_ok=True)
 
-        cmd1 = f'mri_synthmorph register -m deform -t {def_field} {affine_moved} {template_path}'
-        cmd2 = f'mri_synthmorph apply {def_field} {affine_moved} {def_moved}'
-        cmd3 = f'mri_synthmorph apply -m nearest {def_field} {seg_affine_moved} {seg_def_moved}'
+        cmd1 = f'{freesurfer_prefix} mri_synthmorph register -m deform -t {def_field} {affine_moved} {template_path}'
+        cmd2 = f'{freesurfer_prefix} mri_synthmorph apply {def_field} {affine_moved} {def_moved}'
+        cmd3 = f'{freesurfer_prefix} mri_synthmorph apply -m nearest {def_field} {seg_affine_moved} {seg_def_moved}'
         if not os.path.exists(seg_def_moved):
             print(f'About to run: {cmd1}')
             os.system(cmd1)
