@@ -24,6 +24,7 @@ subject_nifti_paths = {
 template_nifti_path = "../inputs/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
 ### -- Options -- ###
+# segmentation = 'fast' # Use Fast segmentation from the FSL installation
 segmentation = 'synthseg_freesurfer' # Use SynthSeg from the FreeSurfer installation
 # segmentation = 'synthseg_github'  # Use SynthSeg from the GitHub repository (NOT WORKING CURRENTLY)
 
@@ -127,7 +128,17 @@ def get_subject_paths(subj_id):
         "ravens_temp": def_reg + f"{subj_id}_t1_RAVENS_temp.nii.gz",
     }
 
-# Labels for segmentation
+# Labels for Fast segmentation
+
+csf_labels = [1]
+
+white_matter_labels = [2]
+
+gray_matter_labels = [3]
+
+background_label = [0]
+
+# Labels for SynthSeg segmentation
 
 # Cerebrospinal Fluid (CSF)
 csf_labels = [4, 5, 14, 15, 24, 43, 44]
@@ -562,7 +573,7 @@ for subj_id in subject_nifti_paths.keys():
     # Skull Stripping with BET
     if skull_strip:
         print(f"Skull Stripping subject image for {subj_id} ...")
-        cmd = f'bet {preproc_subj_nii} {preproc_subj_skull_stripped}'
+        cmd = f'bet {preproc_subj_nii} {preproc_subj_skull_stripped} -f 0.5'
         os.system(cmd)
         subj_path = preproc_subj_skull_stripped
     else:
@@ -571,33 +582,39 @@ for subj_id in subject_nifti_paths.keys():
     # Update paths for downstream steps
     template_path = preproc_template_nii
 
-    # --- Segmentation with SynthSeg (template and subject) ---
-    NUMTHD = 8
-    
-    if segmentation == 'synthseg_freesurfer':
-        synthseg_command = "mri_synthseg"
-    elif segmentation == 'synthseg_github':
-        synthseg_command = "python ../SynthSeg/scripts/commands/SynthSeg_predict.py"
+    if segmentation == 'fast':
+        print(f"Performing Fast segmentation for {subj_id} ...")
+        cmd = f'fast --nopve -o {preproc_subj_nii} {subj_path}'
+        print(f'About to run: {cmd}')
+        os.system(cmd)
+    else:
+        # --- Segmentation with SynthSeg (template and subject) ---
+        NUMTHD = 8
+        
+        if segmentation == 'synthseg_freesurfer':
+            synthseg_command = "mri_synthseg"
+        elif segmentation == 'synthseg_github':
+            synthseg_command = "python ../SynthSeg/scripts/commands/SynthSeg_predict.py"
 
-    # For each subject, segment both the template and the subject's T1 image
-    seg_targets = [
-        (f"template", template_path, f"out_synth/template/"),
-        (subj_id, subj_path, f"out_synth/{subj_id}/init/")
-    ]
-    for cur_id, cur_img, out_base in seg_targets:
-        # Segment image
-        print(f'Segmenting image for {cur_id} ...')
-        out_seg = os.path.join(out_base, f'{cur_id}_t1_seg.nii.gz')
-        out_qc = os.path.join(out_base, f'{cur_id}_t1_Seg_QC.csv')
-        out_vol = os.path.join(out_base, f'{cur_id}_t1_Seg_Vol.csv')
-        out_post = os.path.join(out_base, f'{cur_id}_t1_Seg_Post.nii.gz')
-        out_resample = os.path.join(out_base, f'{cur_id}_t1_Seg_Resample.nii.gz')
-        cmd = f'{freesurfer_prefix} {synthseg_command} --i {cur_img} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --resample {out_resample} --threads {NUMTHD} --cpu'
-        if not os.path.exists(out_seg):
-            print(f'About to run: {cmd}')
-            os.system(cmd)
-        else:
-            print(f'Out file exists, skip: {out_seg}')
+        # For each subject, segment both the template and the subject's T1 image
+        seg_targets = [
+            (f"template", template_path, f"out_synth/template/"),
+            (subj_id, subj_path, f"out_synth/{subj_id}/init/")
+        ]
+        for cur_id, cur_img, out_base in seg_targets:
+            # Segment image
+            print(f'Segmenting image for {cur_id} ...')
+            out_seg = os.path.join(out_base, f'{cur_id}_t1_seg.nii.gz')
+            out_qc = os.path.join(out_base, f'{cur_id}_t1_Seg_QC.csv')
+            out_vol = os.path.join(out_base, f'{cur_id}_t1_Seg_Vol.csv')
+            out_post = os.path.join(out_base, f'{cur_id}_t1_Seg_Post.nii.gz')
+            out_resample = os.path.join(out_base, f'{cur_id}_t1_Seg_Resample.nii.gz')
+            cmd = f'{freesurfer_prefix} {synthseg_command} --i {cur_img} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --resample {out_resample} --threads {NUMTHD} --cpu'
+            if not os.path.exists(out_seg):
+                print(f'About to run: {cmd}')
+                os.system(cmd)
+            else:
+                print(f'Out file exists, skip: {out_seg}')
 
     # Now use the subject's segmentation output for downstream steps
     out_seg = os.path.join(f"out_synth/{subj_id}/init/", f"{subj_id}_t1_seg.nii.gz")
@@ -606,8 +623,8 @@ for subj_id in subject_nifti_paths.keys():
         show(t1_seg, title=f'Segmented T1-weighted MRI ({subj_id})')
 
     # --- Create Binary Mask ---
-    # target_labels = [1]
-    target_labels = csf_labels
+    target_labels = [1]
+    # target_labels = csf_labels
     seg_data = t1_seg.data
     mask_data = np.isin(seg_data, target_labels).astype(np.uint8)
     affine_matrix = np.asarray(t1_seg.geom.vox2world)
