@@ -24,7 +24,8 @@ subject_nifti_paths = {
 template_nifti_path = "../inputs/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
 
-affine = 'synthmorph_freesurfer'
+# affine = 'synthmorph_freesurfer' 
+affine = 'itk'  # ITK-based affine registration using SimpleITK
 # affine = 'flirt'
 
 # deformable = 'synthmorph_freesurfer'
@@ -63,6 +64,7 @@ import pandas as pd
 import os
 import nibabel as nib
 import numpy as np
+import SimpleITK as sitk
 
 
 # Read environment variable for Freesurfer Prefix on Cubic
@@ -329,6 +331,161 @@ def calculate_nifti_volume(filepath: Union[str, Path], verbose: bool = False) ->
         raise
 
 
+def itk_linear_register_nifti(
+    moving_image_path: str,
+    fixed_image_path: str,
+    transform_type: str = "affine",
+    register_as_image_type = sitk.sitkFloat32,
+    interpolator_type = sitk.sitkNearestNeighbor,
+) -> tuple[sitk.Image, sitk.Transform]:
+    """
+    Performs linear registration of a moving NIfTI image to a fixed NIfTI image using ITK.
+
+    This function aligns the moving image to the fixed image's space using a
+    specified linear transformation (rigid, affine, or similarity).
+
+    Args:
+        moving_image_path (str): The file path for the moving NIfTI image (.nii or .nii.gz).
+        fixed_image_path (str): The file path for the fixed (target) NIfTI image.
+        transform_type (str): The type of linear transformation to use.
+                                Options: "rigid", "affine", "similarity".
+                                Defaults to "affine".
+        register_as_image_type: The SimpleITK image type for registration.
+        interpolator_type: The SimpleITK interpolator type.
+
+    Returns:
+        tuple[sitk.Image, sitk.Transform]: A tuple containing:
+            - registered_image (sitk.Image): The moving image resampled to the
+                                             fixed image's space.
+            - final_transform (sitk.Transform): The calculated transformation.
+    """
+    # --- 1. Load the images ---
+    print("Reading images for ITK registration...")
+    moving_image = sitk.ReadImage(moving_image_path, register_as_image_type)
+    fixed_image = sitk.ReadImage(fixed_image_path, register_as_image_type)
+
+    # --- 2. Initialize the registration method ---
+    registration_method = sitk.ImageRegistrationMethod()
+
+    # --- 3. Set up the transform ---
+    if transform_type.lower() == "rigid":
+        initial_transform = sitk.CenteredTransformInitializer(
+            fixed_image, moving_image, sitk.Euler3DTransform(),
+            sitk.CenteredTransformInitializerFilter.GEOMETRY
+        )
+    elif transform_type.lower() == "affine":
+        initial_transform = sitk.CenteredTransformInitializer(
+            fixed_image, moving_image, sitk.AffineTransform(fixed_image.GetDimension()),
+            sitk.CenteredTransformInitializerFilter.GEOMETRY
+        )
+    elif transform_type.lower() == "similarity":
+        initial_transform = sitk.CenteredTransformInitializer(
+            fixed_image, moving_image, sitk.Similarity3DTransform(),
+            sitk.CenteredTransformInitializerFilter.GEOMETRY
+        )
+    else:
+        raise ValueError(f"Unknown transform type '{transform_type}'. Options are 'rigid', 'affine', 'similarity'.")
+
+    registration_method.SetInitialTransform(initial_transform, inPlace=False)
+    print(f"Initialized with {transform_type.capitalize()} transform.")
+
+    # --- 4. Configure the registration components ---
+    # Similarity Metric
+    registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
+    registration_method.SetMetricSamplingStrategy(registration_method.RANDOM)
+    registration_method.SetMetricSamplingPercentage(0.1)
+
+    # Interpolator
+    registration_method.SetInterpolator(interpolator_type)
+
+    # Optimizer
+    lr = 1.0
+    min_step = 1e-4
+    num_iter = 200
+    registration_method.SetOptimizerAsRegularStepGradientDescent(
+        learningRate=lr,
+        minStep=min_step,
+        numberOfIterations=num_iter,
+        estimateLearningRate=registration_method.EachIteration
+    )
+    registration_method.SetOptimizerScalesFromPhysicalShift()
+
+    # --- 5. Setup multi-resolution framework ---
+    registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[4, 2, 1])
+    registration_method.SetSmoothingSigmasPerLevel(smoothingSigmas=[2, 1, 0])
+    registration_method.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
+
+    # --- 6. Add command observers to track progress ---
+    def on_iteration():
+        iteration = registration_method.GetOptimizerIteration()
+        metric = registration_method.GetMetricValue()
+        # print(f"Iteration: {iteration:3} | Metric Value: {metric:10.5f}")
+
+    registration_method.AddCommand(sitk.sitkIterationEvent, on_iteration)
+
+    # --- 7. Execute the registration ---
+    print("\nStarting ITK registration...")
+    final_transform = registration_method.Execute(fixed_image, moving_image)
+    print("ITK registration completed.")
+
+    # --- 8. Print the final results ---
+    print(f"\nOptimizer's stopping condition: {registration_method.GetOptimizerStopConditionDescription()}")
+    print(f"Final metric value: {registration_method.GetMetricValue()}")
+    print("Final Transform Parameters:")
+    print(final_transform)
+
+    # --- 9. Resample the moving image to the fixed image's space ---
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(fixed_image)
+    resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+    resampler.SetDefaultPixelValue(0)
+    resampler.SetTransform(final_transform)
+
+    registered_image = resampler.Execute(moving_image)
+
+    return registered_image, final_transform
+
+
+def reorient_to_LPS(image: sitk.Image) -> sitk.Image:
+    """Reorient image to LPS coordinate system."""
+    return sitk.DICOMOrient(image, 'LPS')
+
+
+def parse_itk_transform(transform: sitk.Transform) -> np.ndarray:
+    """
+    Parse ITK transform parameters to extract the 4x4 transformation matrix.
+    
+    Args:
+        transform: SimpleITK transform object
+        
+    Returns:
+        np.ndarray: 4x4 transformation matrix
+    """
+    try:
+        # Get the transform parameters
+        parameters = transform.GetParameters()
+        
+        # For affine transform, we have 12 parameters (3x3 matrix + 3 translation)
+        if len(parameters) == 12:
+            # Extract the 3x3 linear part and 3 translation components
+            linear_part = np.array(parameters[:9]).reshape(3, 3)
+            translation = np.array(parameters[9:12])
+            
+            # Create 4x4 matrix
+            matrix = np.eye(4)
+            matrix[:3, :3] = linear_part
+            matrix[:3, 3] = translation
+            
+            return matrix
+        else:
+            print(f"Warning: Unexpected number of transform parameters: {len(parameters)}")
+            return None
+            
+    except Exception as e:
+        print(f"Error parsing ITK transform: {e}")
+        return None
+
+
 
 print(f"The shape variable is: {shape}, and its type is: {type(shape)}")
 
@@ -443,11 +600,14 @@ for subj_id in subject_nifti_paths.keys():
         show(temp1, title=f'Binary mask ({subj_id})')
 
     # --- Affine Registration ---
+    # Options: 'synthmorph_freesurfer', 'flirt', 'itk'
     affine_moving = subj1_path
     affine_fixed = template_path
+
+    # Ensure output directory exists for the transform file
+    os.makedirs(os.path.dirname(matrix_filepath), exist_ok=True)
+
     if affine == 'synthmorph_freesurfer':
-        # Ensure output directory exists for the transform file
-        os.makedirs(os.path.dirname(matrix_filepath), exist_ok=True)
         # Estimate and save an affine transform trans.lta in FreeSurfer LTA format
         cmd1 = f'{freesurfer_prefix} mri_synthmorph register -m affine -t {matrix_filepath} {affine_moving} {affine_fixed}'
         # Apply an existing transform to an image
@@ -461,14 +621,43 @@ for subj_id in subject_nifti_paths.keys():
             print(f'Out file exists, skip: {affine_moved}')
     elif affine == 'flirt':
         matrix_filepath = paths["t1_trans"].replace('.lta', '.mat')
-        cmd1 = f'bet {affine_moving} output/stripped.nii.gz'
-        cmd2 = f'flirt -in output/stripped.nii.gz -ref {affine_fixed} -out {affine_moved} -omat {matrix_filepath} -dof 12'
+        # cmd1 = f'bet {affine_moving} output/stripped.nii.gz'
+        # cmd2 = f'flirt -in output/stripped.nii.gz -ref {affine_fixed} -out {affine_moved} -omat {matrix_filepath} -dof 12'
+        cmd2 = f'flirt -in {affine_moving} -ref {affine_fixed} -out {affine_moved} -omat {matrix_filepath} -dof 12'
         if not os.path.exists(affine_moved):
-            print(f'About to run: {cmd1}')
-            os.system(cmd1)
+            # print(f'About to run: {cmd1}')
+            # os.system(cmd1)
+            print(f'About to run: {cmd2}')
             os.system(cmd2)
         else:
             print(f'Out file exists, skip: {affine_moved}')
+    elif affine == 'itk':
+        # Perform ITK-based affine registration
+        print(f'Performing ITK affine registration...')
+        registered_image, final_transform = itk_linear_register_nifti(
+            moving_image_path=affine_moving,
+            fixed_image_path=affine_fixed,
+            transform_type="affine",
+            register_as_image_type=sitk.sitkFloat32,
+            interpolator_type=sitk.sitkLinear
+        )
+        
+        # Save the registered image
+        sitk.WriteImage(registered_image, affine_moved)
+        print(f'ITK registered image saved to: {affine_moved}')
+        
+        # Save the transform parameters for later use
+        transform_params = final_transform.GetParameters()
+        transform_matrix = parse_itk_transform(final_transform)
+        if transform_matrix is not None:
+            # Save transform matrix in a simple text format
+            matrix_filepath = paths["t1_trans"].replace('.lta', '_itk.txt')
+            np.savetxt(matrix_filepath, transform_matrix, fmt='%.6f')
+            print(f'ITK transform matrix saved to: {matrix_filepath}')
+        
+        # Store transform for later use in segmentation application
+        itk_final_transform = final_transform
+        itk_transform_matrix = transform_matrix
 
     # --- Apply the affine step to the segmentation ---
     seg_affine_moving = output_filename
@@ -486,6 +675,26 @@ for subj_id in subject_nifti_paths.keys():
             os.system(cmd)
         else:
             print(f'Out file exists, skip: {seg_affine_moved}')
+    elif affine == 'itk':
+        # Apply the ITK transform to the segmentation mask
+        print(f'Applying ITK transform to segmentation mask...')
+        
+        # Load the segmentation mask
+        seg_mask = sitk.ReadImage(seg_affine_moving, sitk.sitkUInt8)
+        
+        # Create resampler for the segmentation
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetReferenceImage(sitk.ReadImage(affine_fixed))
+        resampler.SetTransform(itk_final_transform)
+        resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+        resampler.SetDefaultPixelValue(0)
+        
+        # Apply transform to segmentation
+        registered_seg = resampler.Execute(seg_mask)
+        
+        # Save the transformed segmentation
+        sitk.WriteImage(registered_seg, seg_affine_moved)
+        print(f'ITK transformed segmentation saved to: {seg_affine_moved}')
 
     # --- Calculate Scale Factor for the Affine Registration ---
     if affine == "synthmorph_freesurfer":
@@ -496,11 +705,23 @@ for subj_id in subject_nifti_paths.keys():
     elif affine == 'flirt':
         flirt_matrix = parse_flirt_mat_file(matrix_filepath)
         if flirt_matrix is not None:
-            # scale_factor = calculate_volume_change_from_matrix(flirt_matrix)
-            # print(f"📈 FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
+            scale_factor = calculate_volume_change_from_matrix(flirt_matrix)
+            print(f"📈 FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
 
             scale_factor = calculate_physical_volume_change(flirt_matrix, subj1_path, template_path)
             print(f"📈 FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
+    elif affine == 'itk':
+        # The transform returned by ITK maps the fixed space to the moving space.
+        # To find the volume change of the moving image, we need the determinant of the INVERSE transform.
+        inverse_transform = itk_final_transform.GetInverse()
+        inverse_matrix = parse_itk_transform(inverse_transform)
+        
+        if inverse_matrix is not None:
+            scale_factor = calculate_volume_change_from_matrix(inverse_matrix)
+            print(f"📈 ITK Volume Change Factor (k): {scale_factor:.4f}\n")
+        else:
+            print("Warning: Could not calculate ITK scale factor from inverse matrix.")
+            scale_factor = 1.0
 
 
     # --- Calculate Volumes for Validation ---
