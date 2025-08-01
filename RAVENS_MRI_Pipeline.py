@@ -23,6 +23,8 @@ subject_nifti_paths = {
 }
 template_nifti_path = "../inputs/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
+# segmentation = 'synthseg_freesurfer'
+segmentation = 'synthseg_github'  # Use SynthSeg from the GitHub repository
 
 # affine = 'synthmorph_freesurfer' 
 affine = 'itk'  # ITK-based affine registration using SimpleITK
@@ -560,6 +562,12 @@ for subj_id in subject_nifti_paths.keys():
 
     # --- Segmentation with SynthSeg (template and subject) ---
     NUMTHD = 8
+    
+    if segmentation == 'synthseg_freesurfer':
+        synthseg_command = "mri_synthseg"
+    elif segmentation == 'synthseg_github':
+        synthseg_command = "python ../SynthSeg/scripts/commands/SynthSeg_predict.py"
+
     # For each subject, segment both the template and the subject's T1 image
     seg_targets = [
         (f"template", template_path, f"out_synth/template/"),
@@ -573,7 +581,7 @@ for subj_id in subject_nifti_paths.keys():
         out_vol = os.path.join(out_base, f'{cur_id}_t1_Seg_Vol.csv')
         out_post = os.path.join(out_base, f'{cur_id}_t1_Seg_Post.nii.gz')
         out_resample = os.path.join(out_base, f'{cur_id}_t1_Seg_Resample.nii.gz')
-        cmd = f'{freesurfer_prefix} mri_synthseg --i {cur_img} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --resample {out_resample} --threads {NUMTHD} --cpu'
+        cmd = f'{freesurfer_prefix} {synthseg_command} --i {cur_img} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --resample {out_resample} --threads {NUMTHD} --cpu'
         if not os.path.exists(out_seg):
             print(f'About to run: {cmd}')
             os.system(cmd)
