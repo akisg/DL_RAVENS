@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# Input Images
+### -- Input Images -- ###
 
-# # # Guray's Inverted Input Files and Template
+# Inverted Input Files and Template
 # subject_nifti_paths = {
 #     "subj1": "../inputs/inverted/in/subj1/subj1_T1_LPS.nii.gz",
 #     # "subj2": "../inputs/inverted/in/subj2/subj2_T1_LPS.nii.gz",
@@ -23,15 +23,18 @@ subject_nifti_paths = {
 }
 template_nifti_path = "../inputs/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
-# segmentation = 'synthseg_freesurfer'
-segmentation = 'synthseg_github'  # Use SynthSeg from the GitHub repository
+### -- Options -- ###
+segmentation = 'synthseg_freesurfer' # Use SynthSeg from the FreeSurfer installation
+# segmentation = 'synthseg_github'  # Use SynthSeg from the GitHub repository (NOT WORKING CURRENTLY)
 
-# affine = 'synthmorph_freesurfer' 
+# affine = 'synthmorph_freesurfer' # Synthmorph affine registration from the FreeSurfer installation
 affine = 'itk'  # ITK-based affine registration using SimpleITK
-# affine = 'flirt'
+# affine = 'flirt' # NOT WORKING CURRENTLY
 
 # deformable = 'synthmorph_freesurfer'
 deformable = 'synthmorph_voxelmorph'
+
+skull_strip = True
 
 SHOW_IMAGES = False
 
@@ -362,7 +365,6 @@ def itk_linear_register_nifti(
             - final_transform (sitk.Transform): The calculated transformation.
     """
     # --- 1. Load the images ---
-    print("Reading images for ITK registration...")
     moving_image = sitk.ReadImage(moving_image_path, register_as_image_type)
     fixed_image = sitk.ReadImage(fixed_image_path, register_as_image_type)
 
@@ -389,7 +391,7 @@ def itk_linear_register_nifti(
         raise ValueError(f"Unknown transform type '{transform_type}'. Options are 'rigid', 'affine', 'similarity'.")
 
     registration_method.SetInitialTransform(initial_transform, inPlace=False)
-    print(f"Initialized with {transform_type.capitalize()} transform.")
+    # print(f"Initialized with {transform_type.capitalize()} transform.")
 
     # --- 4. Configure the registration components ---
     # Similarity Metric
@@ -431,10 +433,10 @@ def itk_linear_register_nifti(
     print("ITK registration completed.")
 
     # --- 8. Print the final results ---
-    print(f"\nOptimizer's stopping condition: {registration_method.GetOptimizerStopConditionDescription()}")
-    print(f"Final metric value: {registration_method.GetMetricValue()}")
-    print("Final Transform Parameters:")
-    print(final_transform)
+    # print(f"\nOptimizer's stopping condition: {registration_method.GetOptimizerStopConditionDescription()}")
+    # print(f"Final metric value: {registration_method.GetMetricValue()}")
+    # print("Final Transform Parameters:")
+    # print(final_transform)
 
     # --- 9. Resample the moving image to the fixed image's space ---
     resampler = sitk.ResampleImageFilter()
@@ -513,7 +515,7 @@ model.load_weights('brains-dice-vel-0.5-res-16-256f.h5')
 for subj_id in subject_nifti_paths.keys():
     print(f"\n===== Processing subject: {subj_id} =====\n")
     paths = get_subject_paths(subj_id)
-    subj1_path = paths["t1"]
+    subj_path = paths["t1"]
     out_seg = paths["t1_seg"]
     output_filename = paths["t1_mask"]
     affine_moved = paths["t1_lin_reg"]
@@ -530,6 +532,7 @@ for subj_id in subject_nifti_paths.keys():
     orig_subj_nii = subject_nifti_paths[subj_id]
     orig_template_nii = template_nifti_path
     preproc_subj_nii = f"out_synth/{subj_id}/init/{subj_id}_t1.nii.gz"
+    preproc_subj_skull_stripped = f"out_synth/{subj_id}/init/{subj_id}_t1_skull_stripped.nii.gz"
     preproc_template_nii = "out_synth/template/template_t1.nii.gz"
 
     # Preprocess template image
@@ -556,8 +559,16 @@ for subj_id in subject_nifti_paths.keys():
     else:
         print(f"Preprocessed subject image exists: {preproc_subj_nii}")
 
+    # Skull Stripping with BET
+    if skull_strip:
+        print(f"Skull Stripping subject image for {subj_id} ...")
+        cmd = f'bet {preproc_subj_nii} {preproc_subj_skull_stripped}'
+        os.system(cmd)
+        subj_path = preproc_subj_skull_stripped
+    else:
+        subj_path = preproc_subj_nii
+
     # Update paths for downstream steps
-    subj1_path = preproc_subj_nii
     template_path = preproc_template_nii
 
     # --- Segmentation with SynthSeg (template and subject) ---
@@ -571,7 +582,7 @@ for subj_id in subject_nifti_paths.keys():
     # For each subject, segment both the template and the subject's T1 image
     seg_targets = [
         (f"template", template_path, f"out_synth/template/"),
-        (subj_id, subj1_path, f"out_synth/{subj_id}/init/")
+        (subj_id, subj_path, f"out_synth/{subj_id}/init/")
     ]
     for cur_id, cur_img, out_base in seg_targets:
         # Segment image
@@ -609,7 +620,7 @@ for subj_id in subject_nifti_paths.keys():
 
     # --- Affine Registration ---
     # Options: 'synthmorph_freesurfer', 'flirt', 'itk'
-    affine_moving = subj1_path
+    affine_moving = subj_path
     affine_fixed = template_path
 
     # Ensure output directory exists for the transform file
@@ -629,19 +640,14 @@ for subj_id in subject_nifti_paths.keys():
             print(f'Out file exists, skip: {affine_moved}')
     elif affine == 'flirt':
         matrix_filepath = paths["t1_trans"].replace('.lta', '.mat')
-        # cmd1 = f'bet {affine_moving} output/stripped.nii.gz'
-        # cmd2 = f'flirt -in output/stripped.nii.gz -ref {affine_fixed} -out {affine_moved} -omat {matrix_filepath} -dof 12'
-        cmd2 = f'flirt -in {affine_moving} -ref {affine_fixed} -out {affine_moved} -omat {matrix_filepath} -dof 12'
+        cmd = f'flirt -in {affine_moving} -ref {affine_fixed} -out {affine_moved} -omat {matrix_filepath} -dof 12'
         if not os.path.exists(affine_moved):
-            # print(f'About to run: {cmd1}')
-            # os.system(cmd1)
-            print(f'About to run: {cmd2}')
-            os.system(cmd2)
+            print(f'About to run: {cmd}')
+            os.system(cmd)
         else:
             print(f'Out file exists, skip: {affine_moved}')
     elif affine == 'itk':
         # Perform ITK-based affine registration
-        print(f'Performing ITK affine registration...')
         registered_image, final_transform = itk_linear_register_nifti(
             moving_image_path=affine_moving,
             fixed_image_path=affine_fixed,
@@ -716,7 +722,7 @@ for subj_id in subject_nifti_paths.keys():
             scale_factor = calculate_volume_change_from_matrix(flirt_matrix)
             print(f"📈 FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
 
-            scale_factor = calculate_physical_volume_change(flirt_matrix, subj1_path, template_path)
+            scale_factor = calculate_physical_volume_change(flirt_matrix, subj_path, template_path)
             print(f"📈 FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
     elif affine == 'itk':
         # The transform returned by ITK maps the fixed space to the moving space.
@@ -772,6 +778,7 @@ for subj_id in subject_nifti_paths.keys():
 
     # --- Deformable Registration using the SynthMorph VoxelMorph Interface ---
     elif deformable == 'synthmorph_voxelmorph':
+        print(f'Performing Deformable Registration using VoxelMorph ...')
         t1_fixed = sf.load_volume(affine_fixed).reshape(shape).reorient('LPS')
         t1_moving = sf.load_volume(affine_moved).resample_like(t1_fixed)
         if SHOW_IMAGES:
