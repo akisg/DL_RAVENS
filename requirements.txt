@@ -1,0 +1,24 @@
+# Core scientific packages
+numpy>=1.21.0
+pandas>=1.3.0
+matplotlib>=3.5.0
+nibabel>=3.2.0
+scipy>=1.7.0
+scikit-learn>=1.0.0
+
+# Medical imaging
+SimpleITK>=2.1.0
+nilearn>=0.9.0
+
+# Deep learning
+tensorflow==2.18
+keras==3.08
+
+# Specialized packages (these will be installed from GitHub in Dockerfile)
+# neurite from https://github.com/adalca/neurite.git@0776a575eadc3d10d6851a4679b7a305f3a31c65
+# surfa from https://github.com/freesurfer/surfa.git@ec5ddb193fd1caf22ec654c457b5678f6bd8e460
+# voxelmorph from https://github.com/voxelmorph/voxelmorph.git@2cd706189cb5919c6335f34feec672f05203e36b
+
+# Additional dependencies
+ants>=0.0.1
+antspynet>=0.0.1 
