@@ -3,6 +3,14 @@
 
 ### -- Input Images -- ###
 
+# CSF Test Input Files and Template
+subject_nifti_paths = {
+    "subj1": "../inputs/csf_test/OAS30574_MR_d1917/OAS30574_MR_d1917_T1.nii.gz",
+    # "subj2": "../inputs/csf_test/OAS30597_MR_d3137/OAS30597_MR_d3137_T1.nii.gz",
+    # "subj3": "../inputs/csf_test/OAS31169_MR_d0620/OAS31169_MR_d0620_T1.nii.gz",
+}
+template_nifti_path = "../inputs/csf_test/OAS30001_MR_d0129/OAS30001_MR_d0129_T1.nii.gz"
+
 # Inverted Input Files and Template
 # subject_nifti_paths = {
 #     "subj1": "../inputs/inverted/in/subj1/subj1_T1_LPS.nii.gz",
@@ -13,15 +21,15 @@
 
 
 # Yuhan's Input Files and Template
-subject_nifti_paths = {
-    "subj1": "../inputs/mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz", # extremely high VN scan
-    # "subj2": "../inputs/mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz", # extremely high VN scan
-    # "subj3": "../inputs/mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz", # extremely small VN scan
-    # "subj4": "../inputs/mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz", # extremely small VN scan
-    # "subj5": "../inputs/mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz", # mean VN scan
-    # "subj6": "../inputs/mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz", # mean VN scan
-}
-template_nifti_path = "../inputs/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
+# subject_nifti_paths = {
+#     "subj1": "../inputs/mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz", # extremely high VN scan
+#     # "subj2": "../inputs/mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz", # extremely high VN scan
+#     # "subj3": "../inputs/mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz", # extremely small VN scan
+#     # "subj4": "../inputs/mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz", # extremely small VN scan
+#     # "subj5": "../inputs/mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz", # mean VN scan
+#     # "subj6": "../inputs/mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz", # mean VN scan
+# }
+# template_nifti_path = "../inputs/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
 ### -- Options -- ###
 # segmentation = 'fast' # Use Fast segmentation from the FSL installation
@@ -35,7 +43,7 @@ affine = 'itk'  # ITK-based affine registration using SimpleITK
 # deformable = 'synthmorph_freesurfer'
 deformable = 'synthmorph_voxelmorph'
 
-skull_strip = True
+skull_strip = False
 
 SHOW_IMAGES = False
 
@@ -128,29 +136,42 @@ def get_subject_paths(subj_id):
         "ravens_temp": def_reg + f"{subj_id}_t1_RAVENS_temp.nii.gz",
     }
 
-# Labels for Fast segmentation
+# Labels for DLICV segmentation
 
-csf_labels = [1]
+# csf_labels = [1,4,11,46,49,50,51,52]
 
-white_matter_labels = [2]
+# 4,3rd Ventricle
+# 11,4th Ventricle
+# 46,CSF
+# 49,Right Inf Lat Vent
+# 50,Left Inf Lat Vent
+# 51,Right Lateral Ventricle
+# 52,Left Lateral Ventricle
 
-gray_matter_labels = [3]
 
-background_label = [0]
+# # Labels for Fast segmentation
 
-# Labels for SynthSeg segmentation
+# csf_labels = [1]
 
-# Cerebrospinal Fluid (CSF)
+# white_matter_labels = [2]
+
+# gray_matter_labels = [3]
+
+# background_label = [0]
+
+# # Labels for SynthSeg segmentation
+
+# # Cerebrospinal Fluid (CSF)
 csf_labels = [4, 5, 14, 15, 24, 43, 44]
 
-# Gray Matter (includes cortex and deep gray matter structures)
-gray_matter_labels = [3, 8, 10, 11, 12, 13, 16, 17, 18, 26, 28, 42, 47, 49, 50, 51, 52, 53, 54, 58, 60]
+# # Gray Matter (includes cortex and deep gray matter structures)
+# gray_matter_labels = [3, 8, 10, 11, 12, 13, 16, 17, 18, 26, 28, 42, 47, 49, 50, 51, 52, 53, 54, 58, 60]
 
-# White Matter
-white_matter_labels = [2, 7, 41, 46]
+# # White Matter
+# white_matter_labels = [2, 7, 41, 46]
 
-# Background
-background_label = [0]
+# # Background
+# background_label = [0]
 
 
 def calculate_volume_change_from_matrix(matrix: np.ndarray) -> float:
@@ -550,8 +571,8 @@ for subj_id in subject_nifti_paths.keys():
     if not os.path.exists(preproc_template_nii):
         print("Preprocessing template image ...")
         # template_vol = sf.load_volume(orig_template_nii).resize(voxsize=2).reshape(shape).reorient('LPS')
-        # template_vol = sf.load_volume(orig_template_nii).reshape(shape).reorient('LPS')
-        template_vol = sf.load_volume(orig_template_nii).reorient('LPS')
+        template_vol = sf.load_volume(orig_template_nii).reshape(shape).reorient('LPS')
+        # template_vol = sf.load_volume(orig_template_nii).reorient('LPS')
         os.makedirs(os.path.dirname(preproc_template_nii), exist_ok=True)
         template_vol.save(preproc_template_nii)
     else:
@@ -563,8 +584,8 @@ for subj_id in subject_nifti_paths.keys():
         # subj_vol = sf.load_volume(orig_subj_nii).resize(voxsize=2).reshape(shape).reorient('LPS')
         # subj_vol = sf.load_volume(orig_subj_nii).reshape(shape).reorient('LPS')
 
-        # subj_vol = sf.load_volume(orig_subj_nii).resample_like(template_vol)
-        subj_vol = sf.load_volume(orig_subj_nii).reorient('LPS')
+        subj_vol = sf.load_volume(orig_subj_nii).resample_like(template_vol)
+        # subj_vol = sf.load_volume(orig_subj_nii).reorient('LPS')
         os.makedirs(os.path.dirname(preproc_subj_nii), exist_ok=True)
         subj_vol.save(preproc_subj_nii)
     else:
@@ -573,9 +594,26 @@ for subj_id in subject_nifti_paths.keys():
     # Skull Stripping with BET
     if skull_strip:
         print(f"Skull Stripping subject image for {subj_id} ...")
-        cmd = f'bet {preproc_subj_nii} {preproc_subj_skull_stripped} -f 0.5'
-        os.system(cmd)
+        # cmd = f'bet {preproc_subj_nii} {preproc_subj_skull_stripped} -R -f 0.5 -g 0'
+        # os.system(cmd)
+        # subj_path = preproc_subj_skull_stripped
+
+        import ants
+        import antspynet
+        import os
+
+        # Load image
+        img = ants.image_read(preproc_subj_nii)
+
+        # Perform brain extraction
+        brain_mask = antspynet.brain_extraction(img, modality="t1")
+
+        # Apply mask and save
+        skull_stripped_img = img * brain_mask
+        ants.image_write(skull_stripped_img,preproc_subj_skull_stripped)
+        
         subj_path = preproc_subj_skull_stripped
+
     else:
         subj_path = preproc_subj_nii
 
@@ -584,9 +622,15 @@ for subj_id in subject_nifti_paths.keys():
 
     if segmentation == 'fast':
         print(f"Performing Fast segmentation for {subj_id} ...")
-        cmd = f'fast --nopve -o {preproc_subj_nii} {subj_path}'
-        print(f'About to run: {cmd}')
-        os.system(cmd)
+        out_seg = os.path.join(f"out_synth/{subj_id}/init/", f'{subj_id}_t1_seg.nii.gz')
+
+        if not os.path.exists(out_seg):
+            os.makedirs(os.path.dirname(matrix_filepath), exist_ok=True)
+            cmd = f'fast --nopve -o {preproc_subj_nii} {subj_path}'
+            print(f'About to run: {cmd}')
+            os.system(cmd)
+        else:
+            print(f'Out file exists, skip: {out_seg}')
     else:
         # --- Segmentation with SynthSeg (template and subject) ---
         NUMTHD = 8
@@ -623,8 +667,7 @@ for subj_id in subject_nifti_paths.keys():
         show(t1_seg, title=f'Segmented T1-weighted MRI ({subj_id})')
 
     # --- Create Binary Mask ---
-    target_labels = [1]
-    # target_labels = csf_labels
+    target_labels = csf_labels
     seg_data = t1_seg.data
     mask_data = np.isin(seg_data, target_labels).astype(np.uint8)
     affine_matrix = np.asarray(t1_seg.geom.vox2world)
@@ -796,8 +839,11 @@ for subj_id in subject_nifti_paths.keys():
     # --- Deformable Registration using the SynthMorph VoxelMorph Interface ---
     elif deformable == 'synthmorph_voxelmorph':
         print(f'Performing Deformable Registration using VoxelMorph ...')
-        t1_fixed = sf.load_volume(affine_fixed).reshape(shape).reorient('LPS')
-        t1_moving = sf.load_volume(affine_moved).resample_like(t1_fixed)
+        # t1_fixed = sf.load_volume(affine_fixed).reshape(shape).reorient('LPS')
+        t1_fixed = sf.load_volume(affine_fixed)
+        # t1_moving = sf.load_volume(affine_moved).resample_like(t1_fixed)
+
+        t1_moving = sf.load_volume(affine_moved)
         if SHOW_IMAGES:
             show(t1_fixed, title=f'Fixed T1-weighted MRI ({subj_id})')
             show(t1_moving, title=f'Moving T1-weighted MRI ({subj_id})')
@@ -805,6 +851,9 @@ for subj_id in subject_nifti_paths.keys():
         fixed = normalize(t1_fixed)
         trans = model.predict((moving, fixed))
         moved = vxm.layers.SpatialTransformer(fill_value=0)((moving, trans))
+        os.makedirs(os.path.dirname(def_field), exist_ok=True)
+        t1_fixed.new(trans[0]).save(def_field)
+        t1_fixed.new(moved[0]).save(def_moved)
         if SHOW_IMAGES:
             show(t1_moving, title=f'Moving T1-weighted MRI ({subj_id})')
             show(moved, title=f'Moved T1-weighted MRI ({subj_id})')
@@ -860,8 +909,8 @@ for subj_id in subject_nifti_paths.keys():
         nii_seg_data = nii_seg.get_fdata()
         ravens = img_jac * nii_seg_data
         nii_out = nib.Nifti1Image(ravens, nii_jac.affine)
-        nib.save(nii_out, ravens_temp_path)
-        print(f"Temp RAVENS map saved to: {ravens_temp_path}")
+        # nib.save(nii_out, ravens_temp_path)
+        # print(f"Temp RAVENS map saved to: {ravens_temp_path}")
         ravens /= scale_factor
         nii_out = nib.Nifti1Image(ravens, nii_jac.affine)
         nib.save(nii_out, f_out)
