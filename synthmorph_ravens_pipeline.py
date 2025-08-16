@@ -16,11 +16,6 @@ import numpy as np
 import SimpleITK as sitk
 
 
-
-# Read environment variable for Freesurfer Prefix on Cubic
-freesurfer_prefix = os.getenv('FREESURFERSIF', '')
-print(f"The value of $FREESURFERSIF is: {freesurfer_prefix}.")
-
 ### -- Input Images -- ###
 
 # Read environment variable for input directory
@@ -75,44 +70,25 @@ template_nifti_path = f"{input_dir}/test_input/original/template/template_t1.nii
 # template_nifti_path = f"{input_dir}/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
 ### -- Options -- ###
-# segmentation = 'fast' # Use Fast segmentation from the FSL installation
-segmentation = 'synthseg_freesurfer' # Use SynthSeg from the FreeSurfer installation
-# segmentation = 'synthseg_github'  # Use SynthSeg from the GitHub repository (NOT WORKING CURRENTLY)
+target_roi = 'csf' # options: csf, gray_matter, white_matter, background
 
-# affine = 'synthmorph_freesurfer' # Synthmorph affine registration from the FreeSurfer installation
-affine = 'itk'  # ITK-based affine registration using SimpleITK
-# affine = 'flirt' # NOT WORKING CURRENTLY
+segmentation = 'synthseg_freesurfer' # options: synthseg_freesurfer, synthseg_github, dlicv, fast
 
-# deformable = 'synthmorph_freesurfer'
-deformable = 'synthmorph_voxelmorph'
+affine = 'itk' # options: synthmorph_freesurfer, itk, flirt
 
-skull_strip = False
+deformable = 'synthmorph_voxelmorph' # options: synthmorph_freesurfer, synthmorph_voxelmorph
 
-SHOW_IMAGES = False
+skull_strip = False  # options: True, False
 
+# shape = (128, 128, 128)
+shape = (256, 256, 256)
 
-
-# # Packages from GitHub.
-# !pip -q install git+https://github.com/adalca/neurite.git@0776a575eadc3d10d6851a4679b7a305f3a31c65
-# !pip -q install git+https://github.com/freesurfer/surfa.git@ec5ddb193fd1caf22ec654c457b5678f6bd8e460
-# !pip -q install git+https://github.com/voxelmorph/voxelmorph.git@2cd706189cb5919c6335f34feec672f05203e36b
-# !pip -q install nilearn
-
-# Download models
-# !curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/shapes-dice-vel-3-res-8-16-32-256f.h5
-# !curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/brains-dice-vel-0.5-res-16-256f.h5
-
-
-# !pip install tensorflow==2.18
-# !pip install keras==3.08
-
-# get_ipython().system('pip show tensorflow')
-# get_ipython().system('pip show keras')
+# Read environment variable for Freesurfer Prefix on Cubic
+freesurfer_prefix = os.getenv('FREESURFERSIF', '')
+print(f"The value of $FREESURFERSIF is: {freesurfer_prefix}.")
 
 
 # Helper functions. The shape has to be divisible by 16.
-# shape = (128, 128, 128)
-shape = (256, 256, 256)
 
 def normalize(x):
     x = np.float32(x)
@@ -121,8 +97,6 @@ def normalize(x):
     return x[None, ..., None]
 
 def show(x, title=None):
-    if not SHOW_IMAGES:
-        return
     x = np.squeeze(x)
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
     i, j, k = (f // 2 for f in x.shape)
@@ -134,8 +108,6 @@ def show(x, title=None):
 
     if title:
         axes[1].text(0.50, 1.05, title, ha='center', transform=axes[1].transAxes, size=14)
-
-
 
 
 # Helper function to get all paths for a subject
@@ -158,40 +130,41 @@ def get_subject_paths(subj_id):
         "ravens_temp": def_reg + f"{subj_id}_t1_RAVENS_temp.nii.gz",
     }
 
-# Labels for DLICV segmentation
+# Segmentation Labels Dictionary
+# Organized by segmentation method and target ROI
+SEGMENTATION_LABELS = {
+    'dlicv': {
+        'csf': [1, 4, 11, 46, 49, 50, 51, 52],  # 3rd Ventricle, 4th Ventricle, CSF, Inf Lat Vent, Lateral Ventricles
+        'gray_matter': [0],
+        'white_matter': [0],
+        'background': [0]
+    },
+    'fast': {
+        'csf': [1],
+        'gray_matter': [2],
+        'white_matter': [3],
+        'background': [0]
+    },
+    'synthseg_freesurfer': {
+        'csf': [4, 5, 14, 15, 24, 43, 44],
+        'gray_matter': [3, 8, 10, 11, 12, 13, 16, 17, 18, 26, 28, 42, 47, 49, 50, 51, 52, 53, 54, 58, 60],
+        'white_matter': [2, 7, 41, 46],
+        'background': [0]
+    },
+    'synthseg_github': {
+        'csf': [4, 5, 14, 15, 24, 43, 44],
+        'gray_matter': [3, 8, 10, 11, 12, 13, 16, 17, 18, 26, 28, 42, 47, 49, 50, 51, 52, 53, 54, 58, 60],
+        'white_matter': [2, 7, 41, 46],
+        'background': [0]
+    }
+}
 
-# csf_labels = [1,4,11,46,49,50,51,52]
 
-# 4,3rd Ventricle
-# 11,4th Ventricle
-# 46,CSF
-# 49,Right Inf Lat Vent
-# 50,Left Inf Lat Vent
-# 51,Right Lateral Ventricle
-# 52,Left Lateral Ventricle
-
-
-# Labels for Fast segmentation
-# csf_labels = [1]
-# gray_matter_labels = [2]
-# white_matter_labels = [3]
-
-
-# background_label = [0]
-
-# # Labels for SynthSeg segmentation
-
-# # Cerebrospinal Fluid (CSF)
-csf_labels = [4, 5, 14, 15, 24, 43, 44]
-
-# # Gray Matter (includes cortex and deep gray matter structures)
-# gray_matter_labels = [3, 8, 10, 11, 12, 13, 16, 17, 18, 26, 28, 42, 47, 49, 50, 51, 52, 53, 54, 58, 60]
-
-# # White Matter
-# white_matter_labels = [2, 7, 41, 46]
-
-# # Background
-# background_label = [0]
+# Get the target labels for the current configuration
+target_labels = SEGMENTATION_LABELS[segmentation][target_roi]
+print(f"Using segmentation method: {segmentation}")
+print(f"Target ROI: {target_roi}")
+print(f"Target labels: {target_labels}")
 
 
 def calculate_volume_change_from_matrix(matrix: np.ndarray) -> float:
@@ -320,9 +293,7 @@ def calculate_physical_volume_change(
     return k_physical
 
 
-
-
-# ## Validate Scale Factor Value from the actual data
+# Validate Scale Factor Value from the actual data
 
 from pathlib import Path
 from typing import Union
@@ -564,8 +535,144 @@ model = tf.keras.Model(model.inputs, model.references.pos_flow)
 model.load_weights('brains-dice-vel-0.5-res-16-256f.h5')
 
 
+# --- Step 1: Preprocessing Loop ---
+print("\n===== STEP 1: PREPROCESSING =====")
+
+# Preprocess template image first (only once)
+orig_template_nii = template_nifti_path
+preproc_template_nii = f"{output_dir}/template/template_t1.nii.gz"
+
+if not os.path.exists(preproc_template_nii):
+    print("Preprocessing template image ...")
+    if shape == (128, 128, 128):
+        template_vol = sf.load_volume(orig_template_nii).resize(voxsize=2).reshape(shape).reorient('LPS')
+    else:
+        template_vol = sf.load_volume(orig_template_nii).reshape(shape).reorient('LPS')
+    os.makedirs(os.path.dirname(preproc_template_nii), exist_ok=True)
+    template_vol.save(preproc_template_nii)
+else:
+    print(f"Preprocessed template image exists: {preproc_template_nii}")
+
+# Preprocess all subjects
 for subj_id in subject_nifti_paths.keys():
-    print(f"\n===== Processing subject: {subj_id} =====\n")
+    print(f"\n--- Preprocessing subject: {subj_id} ---")
+    
+    orig_subj_nii = subject_nifti_paths[subj_id]
+    preproc_subj_nii = f"{output_dir}/{subj_id}/init/{subj_id}_t1.nii.gz"
+    preproc_subj_skull_stripped = f"{output_dir}/{subj_id}/init/{subj_id}_t1_skull_stripped.nii.gz"
+    
+    # Preprocess subject image
+    if not os.path.exists(preproc_subj_nii):
+        print(f"Preprocessing subject image for {subj_id} ...")
+        subj_vol = sf.load_volume(orig_subj_nii).resample_like(template_vol, method='nearest')
+        os.makedirs(os.path.dirname(preproc_subj_nii), exist_ok=True)
+        subj_vol.save(preproc_subj_nii)
+    else:
+        print(f"Preprocessed subject image exists: {preproc_subj_nii}")
+
+    # Skull Stripping with BET
+    if skull_strip:
+        print(f"Skull Stripping subject image for {subj_id} ...")
+        import ants
+        import antspynet
+
+        # Load image
+        img = ants.image_read(preproc_subj_nii)
+
+        # Perform brain extraction
+        brain_mask = antspynet.brain_extraction(img, modality="t1")
+
+        # Apply mask and save
+        skull_stripped_img = img * brain_mask
+        ants.image_write(skull_stripped_img, preproc_subj_skull_stripped)
+    else:
+        print(f"Skipping skull stripping for {subj_id}")
+
+# --- Step 2: Segmentation Loop ---
+print("\n===== STEP 2: SEGMENTATION =====")
+
+# Segment template first (only once)
+template_path = preproc_template_nii
+if segmentation != 'fast':
+    NUMTHD = 8
+    
+    if segmentation == 'synthseg_freesurfer':
+        synthseg_command = "mri_synthseg"
+    elif segmentation == 'synthseg_github':
+        synthseg_command = "python ../SynthSeg/scripts/commands/SynthSeg_predict.py"
+
+    # Segment template
+    print(f'Segmenting template image...')
+    template_out_seg = os.path.join(f"{output_dir}/template/", 'template_t1_seg.nii.gz')
+    template_out_qc = os.path.join(f"{output_dir}/template/", 'template_t1_Seg_QC.csv')
+    template_out_vol = os.path.join(f"{output_dir}/template/", 'template_t1_Seg_Vol.csv')
+    template_out_post = os.path.join(f"{output_dir}/template/", 'template_t1_Seg_Post.nii.gz')
+    template_cmd = f'{freesurfer_prefix} {synthseg_command} --i {template_path} --o {template_out_seg} --robust --vol {template_out_vol} --qc {template_out_qc} --threads {NUMTHD} --cpu'
+
+    if not os.path.exists(template_out_seg):
+        print(f'About to run: {template_cmd}')
+        start_time = time.time()
+        os.system(template_cmd)
+        end_time = time.time()
+        synthseg_time = end_time - start_time
+        print(f'SynthSeg completed for template in {synthseg_time:.2f} seconds ({synthseg_time/60:.2f} minutes)')
+    else:
+        print(f'Template segmentation exists, skip: {template_out_seg}')
+
+# Segment all subjects
+for subj_id in subject_nifti_paths.keys():
+    print(f"\n--- Segmenting subject: {subj_id} ---")
+    
+    paths = get_subject_paths(subj_id)
+    out_seg = paths["t1_seg"]
+    output_filename = paths["t1_mask"]
+    
+    # Determine subject image path (skull stripped or not)
+    preproc_subj_nii = f"{output_dir}/{subj_id}/init/{subj_id}_t1.nii.gz"
+    preproc_subj_skull_stripped = f"{output_dir}/{subj_id}/init/{subj_id}_t1_skull_stripped.nii.gz"
+    
+    if skull_strip and os.path.exists(preproc_subj_skull_stripped):
+        subj_path = preproc_subj_skull_stripped
+    else:
+        subj_path = preproc_subj_nii
+
+    if segmentation == 'fast':
+        print(f"Performing Fast segmentation for {subj_id} ...")
+        out_seg = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_seg.nii.gz')
+
+        if not os.path.exists(out_seg):
+            os.makedirs(os.path.dirname(out_seg), exist_ok=True)
+            cmd = f'fast --nopve -o {out_seg} {subj_path}'
+            print(f'About to run: {cmd}')
+            os.system(cmd)
+        else:
+            print(f'Out file exists, skip: {out_seg}')
+    else:
+        # Segment subject
+        print(f'Segmenting image for {subj_id} ...')
+        out_seg = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_seg.nii.gz')
+        out_qc = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_Seg_QC.csv')
+        out_vol = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_Seg_Vol.csv')
+        out_post = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_Seg_Post.nii.gz')
+        cmd = f'{freesurfer_prefix} {synthseg_command} --i {subj_path} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --threads {NUMTHD} --cpu'
+
+        if not os.path.exists(out_seg):
+            print(f'About to run: {cmd}')
+            start_time = time.time()
+            os.system(cmd)
+            end_time = time.time()
+            synthseg_time = end_time - start_time
+            print(f'SynthSeg completed for {subj_id} in {synthseg_time:.2f} seconds ({synthseg_time/60:.2f} minutes)')
+        else:
+            print(f'Out file exists, skip: {out_seg}')
+
+
+# --- Step 3: Registration Loop ---
+print("\n===== STEP 3: REGISTRATION =====")
+
+for subj_id in subject_nifti_paths.keys():
+    print(f"\n--- Registering subject: {subj_id} ---")
+    
     paths = get_subject_paths(subj_id)
     subj_path = paths["t1"]
     out_seg = paths["t1_seg"]
@@ -580,130 +687,20 @@ for subj_id in subject_nifti_paths.keys():
     ravens_path = paths["ravens"]
     ravens_temp_path = paths["ravens_temp"]
 
-    # --- Input original NIfTI paths and preprocess (resize/reshape/resample) ---
-    orig_subj_nii = subject_nifti_paths[subj_id]
-    orig_template_nii = template_nifti_path
-    preproc_subj_nii = f"{output_dir}/{subj_id}/init/{subj_id}_t1.nii.gz"
-    preproc_subj_skull_stripped = f"{output_dir}/{subj_id}/init/{subj_id}_t1_skull_stripped.nii.gz"
-    preproc_template_nii = f"{output_dir}/template/template_t1.nii.gz"
-
-    # Preprocess template image
-    if not os.path.exists(preproc_template_nii):
-        print("Preprocessing template image ...")
-        if shape == (128, 128, 128):
-            template_vol = sf.load_volume(orig_template_nii).resize(voxsize=2).reshape(shape).reorient('LPS')
-        else:
-            template_vol = sf.load_volume(orig_template_nii).reshape(shape).reorient('LPS')
-        os.makedirs(os.path.dirname(preproc_template_nii), exist_ok=True)
-        template_vol.save(preproc_template_nii)
-    else:
-        print(f"Preprocessed template image exists: {preproc_template_nii}")
-    
-    # Preprocess subject image
-    if not os.path.exists(preproc_subj_nii):
-        print(f"Preprocessing subject image for {subj_id} ...")
-        subj_vol = sf.load_volume(orig_subj_nii).resample_like(template_vol, method='nearest')
-        os.makedirs(os.path.dirname(preproc_subj_nii), exist_ok=True)
-        subj_vol.save(preproc_subj_nii)
-    else:
-        print(f"Preprocessed subject image exists: {preproc_subj_nii}")
-
-    # Skull Stripping with BET
-    if skull_strip:
-        print(f"Skull Stripping subject image for {subj_id} ...")
-        # cmd = f'bet {preproc_subj_nii} {preproc_subj_skull_stripped} -R -f 0.5 -g 0'
-        # os.system(cmd)
-        # subj_path = preproc_subj_skull_stripped
-
-        import ants
-        import antspynet
-        import os
-
-        # Load image
-        img = ants.image_read(preproc_subj_nii)
-
-        # Perform brain extraction
-        brain_mask = antspynet.brain_extraction(img, modality="t1")
-
-        # Apply mask and save
-        skull_stripped_img = img * brain_mask
-        ants.image_write(skull_stripped_img,preproc_subj_skull_stripped)
-        
-        subj_path = preproc_subj_skull_stripped
-
-    else:
-        subj_path = preproc_subj_nii
-
-    # Update paths for downstream steps
-    template_path = preproc_template_nii
-
-    if segmentation == 'fast':
-        print(f"Performing Fast segmentation for {subj_id} ...")
-        out_seg = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_seg.nii.gz')
-
-        if not os.path.exists(out_seg):
-            os.makedirs(os.path.dirname(matrix_filepath), exist_ok=True)
-            cmd = f'fast --nopve -o {preproc_subj_nii} {subj_path}'
-            print(f'About to run: {cmd}')
-            os.system(cmd)
-        else:
-            print(f'Out file exists, skip: {out_seg}')
-    else:
-        # --- Segmentation with SynthSeg (template and subject) ---
-        NUMTHD = 8
-        
-        if segmentation == 'synthseg_freesurfer':
-            synthseg_command = "mri_synthseg"
-        elif segmentation == 'synthseg_github':
-            synthseg_command = "python ../SynthSeg/scripts/commands/SynthSeg_predict.py"
-
-        # For each subject, segment both the template and the subject's T1 image
-        seg_targets = [
-            (f"template", template_path, f"{output_dir}/template/"),
-            (subj_id, subj_path, f"{output_dir}/{subj_id}/init/")
-        ]
-        for cur_id, cur_img, out_base in seg_targets:
-            # Segment image
-            print(f'Segmenting image for {cur_id} ...')
-            out_seg = os.path.join(out_base, f'{cur_id}_t1_seg.nii.gz')
-            out_qc = os.path.join(out_base, f'{cur_id}_t1_Seg_QC.csv')
-            out_vol = os.path.join(out_base, f'{cur_id}_t1_Seg_Vol.csv')
-            out_post = os.path.join(out_base, f'{cur_id}_t1_Seg_Post.nii.gz')
-            cmd = f'{freesurfer_prefix} {synthseg_command} --i {cur_img} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --threads {NUMTHD} --cpu'
-
-            if not os.path.exists(out_seg):
-                print(f'About to run: {cmd}')
-                start_time = time.time()
-                os.system(cmd)
-                end_time = time.time()
-                synthseg_time = end_time - start_time
-                print(f'SynthSeg completed for {cur_id} in {synthseg_time:.2f} seconds ({synthseg_time/60:.2f} minutes)')
-            else:
-                print(f'Out file exists, skip: {out_seg}')
 
     # Now use the subject's segmentation output for downstream steps
     out_seg = os.path.join(f"{output_dir}/{subj_id}/init/", f"{subj_id}_t1_seg.nii.gz")
     # t1_seg = sf.load_volume(out_seg).reshape(shape).reorient('LPS')
     t1_seg = sf.load_volume(out_seg).reorient('LPS')
 
-    if SHOW_IMAGES:
-        show(t1_seg, title=f'Segmented T1-weighted MRI ({subj_id})')
-
     # --- Create Binary Mask ---
-    target_labels = csf_labels
-    # target_labels = gray_matter_labels
-
     seg_data = t1_seg.data
     mask_data = np.isin(seg_data, target_labels).astype(np.uint8)
     affine_matrix = np.asarray(t1_seg.geom.vox2world)
     csf_mask_nii = nib.Nifti1Image(mask_data, affine_matrix)
     nib.save(csf_mask_nii, output_filename)
     print(f"Binary mask saved to: {output_filename}")
-    # temp1 = sf.load_volume(output_filename).reshape(shape).reorient('LPS')
-    temp1 = sf.load_volume(output_filename).reorient('LPS')
 
-    if SHOW_IMAGES:
-        show(temp1, title=f'Binary mask ({subj_id})')
 
     # --- Affine Registration ---
     # Options: 'synthmorph_freesurfer', 'flirt', 'itk'
@@ -802,15 +799,15 @@ for subj_id in subject_nifti_paths.keys():
         lta_matrix = parse_freesurfer_lta_file(matrix_filepath)
         if lta_matrix is not None:
             scale_factor = calculate_volume_change_from_matrix(lta_matrix)
-            print(f"📈 SynthMorph Volume Change Factor (k): {scale_factor:.4f}\n")
+            print(f"SynthMorph Volume Change Factor (k): {scale_factor:.4f}\n")
     elif affine == 'flirt':
         flirt_matrix = parse_flirt_mat_file(matrix_filepath)
         if flirt_matrix is not None:
             scale_factor = calculate_volume_change_from_matrix(flirt_matrix)
-            print(f"📈 FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
+            print(f"FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
 
             scale_factor = calculate_physical_volume_change(flirt_matrix, subj_path, template_path)
-            print(f"📈 FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
+            print(f"FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
     elif affine == 'itk':
         # The transform returned by ITK maps the fixed space to the moving space.
         # To find the volume change of the moving image, we need the determinant of the INVERSE transform.
@@ -819,7 +816,7 @@ for subj_id in subject_nifti_paths.keys():
         
         if inverse_matrix is not None:
             scale_factor = calculate_volume_change_from_matrix(inverse_matrix)
-            print(f"📈 ITK Volume Change Factor (k): {scale_factor:.4f}\n")
+            print(f"ITK Volume Change Factor (k): {scale_factor:.4f}\n")
         else:
             print("Warning: Could not calculate ITK scale factor from inverse matrix.")
             scale_factor = 1.0
@@ -868,9 +865,7 @@ for subj_id in subject_nifti_paths.keys():
         print(f'Performing Deformable Registration using VoxelMorph ...')
         t1_fixed = sf.load_volume(affine_fixed)
         t1_moving = sf.load_volume(affine_moved)
-        if SHOW_IMAGES:
-            show(t1_fixed, title=f'Fixed T1-weighted MRI ({subj_id})')
-            show(t1_moving, title=f'Moving T1-weighted MRI ({subj_id})')
+
         moving = normalize(t1_moving)
         fixed = normalize(t1_fixed)
         trans = model.predict((moving, fixed))
@@ -878,11 +873,6 @@ for subj_id in subject_nifti_paths.keys():
         os.makedirs(os.path.dirname(def_field), exist_ok=True)
         t1_fixed.new(trans[0]).save(def_field)
         t1_fixed.new(moved[0]).save(def_moved)
-        if SHOW_IMAGES:
-            show(t1_moving, title=f'Moving T1-weighted MRI ({subj_id})')
-            show(moved, title=f'Moved T1-weighted MRI ({subj_id})')
-            show(fixed, title=f'Fixed T1-weighted MRI ({subj_id})')
-            show(moved - fixed, title=f'Difference after registration 1 ({subj_id})')
 
         # --- Deformable Registration of Segmented Image ---
         # Define the template segmentation path based on the segmentation step
@@ -890,20 +880,11 @@ for subj_id in subject_nifti_paths.keys():
         t1_fixed_seg = sf.load_volume(template_seg_path)
         t1_moving_seg = sf.load_volume(seg_affine_moved)
 
-        before = normalize(t1_moving_seg) - normalize(t1_fixed_seg)
-        if SHOW_IMAGES:
-            show(t1_moving_seg, title=f'Moving Registered T1-weighted MRI ({subj_id})')
-            show(t1_fixed_seg, title=f'Fixed Registered T1-weighted MRI ({subj_id})')
-            show(before, title=f'Difference before Segmented registration ({subj_id})')
-
         # --- Apply Deformation Field to Segmented Image ---
         moving_seg = normalize(t1_moving_seg)
         fixed_seg = normalize(t1_fixed_seg)
         moved_seg = vxm.layers.SpatialTransformer(interp_method='nearest', fill_value=0)((moving_seg, trans))
-        if SHOW_IMAGES:
-            show(moved_seg, title=f'Moved T1-weighted MRI ({subj_id})')
-            show(fixed_seg, title=f'Fixed T1-weighted MRI ({subj_id})')
-            show(moved_seg - fixed_seg, title=f'Difference after Segmented registration ({subj_id})')
+
         os.makedirs(os.path.dirname(seg_def_moved), exist_ok=True)
         t1_fixed.new(moved_seg[0]).save(seg_def_moved)
 
@@ -927,7 +908,7 @@ for subj_id in subject_nifti_paths.keys():
     print(f"Jacobian determinant saved to: {jac_det_path}")
 
     # --- Calculate Ravens Map ---
-    def calc_ravens(f_jac, f_seg, labels, f_out):
+    def calc_ravens(f_jac, f_seg, f_out):
         nii_jac = nib.load(f_jac)
         img_jac = nii_jac.get_fdata()
         nii_seg = nib.load(f_seg)
@@ -941,12 +922,7 @@ for subj_id in subject_nifti_paths.keys():
         nib.save(nii_out, f_out)
         print(f"RAVENS map saved to: {f_out}")
 
-    calc_ravens(jac_det_path, seg_def_moved, target_labels, ravens_path)
-
-    # --- Show RAVENS Maps ---
-    if SHOW_IMAGES:
-        t1_rav = sf.load_volume(ravens_path)
-        show(t1_rav, title=f'RAVENS Map ({subj_id})')
+    calc_ravens(jac_det_path, seg_def_moved, ravens_path)
 
     # --- Print Sums for Debugging ---
     print(f"\nThe volume of the original mask is: {volume_2}")
@@ -955,22 +931,3 @@ for subj_id in subject_nifti_paths.keys():
     data = nii_file.get_fdata()
     total_sum = np.sum(data)
     print(f"The sum of the values in the final RAVENS map is: {total_sum}")
-
-    # nii_file = nib.load(ravens_temp_path)
-    # data = nii_file.get_fdata()
-    # total_sum = np.sum(data)
-    # print(f"The sum of the values in temp RAVENS is: {total_sum}")
-
-    # nii_file = nib.load(out_seg)
-    # data = nii_file.get_fdata()
-    # voxel_count = np.count_nonzero(np.isin(data, target_labels))
-    # print(f"The number of voxels with a value of X in the Original Image is: {voxel_count}")
-    # nii_file = nib.load(output_filename)
-    # data = nii_file.get_fdata()
-    # total_sum = np.sum(data)
-    # print(f"The sum of the values in Original MASK is: {total_sum}")
-    # nii_file = nib.load(output_filename)
-    # data = nii_file.get_fdata()
-    # voxel_count = np.count_nonzero(data)
-    # print(f"The count of the values in Original mask is: {voxel_count}")
-
