@@ -1,0 +1,4 @@
+*.gz
+*.csv
+*.out
+.DS_Store
