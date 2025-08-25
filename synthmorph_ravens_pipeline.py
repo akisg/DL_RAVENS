@@ -10,10 +10,55 @@ import tensorflow as tf
 import voxelmorph as vxm
 import matplotlib.pyplot as plt
 import pandas as pd
-import os
 import nibabel as nib
-import numpy as np
 import SimpleITK as sitk
+
+# # Configure TensorFlow for GPU compatibility
+# # These settings help prevent cuDNN errors on A100 GPUs
+# os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+# os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
+
+# # Configure GPU memory growth to prevent allocation issues
+# gpus = tf.config.experimental.list_physical_devices('GPU')
+# if gpus:
+#     try:
+#         # Currently, memory growth needs to be the same across GPUs
+#         for gpu in gpus:
+#             tf.config.experimental.set_memory_growth(gpu, True)
+#         print(f"Found {len(gpus)} GPU(s). Memory growth enabled.")
+#     except RuntimeError as e:
+#         # Memory growth must be set before GPUs have been initialized
+#         print(f"GPU configuration warning: {e}")
+
+# # Additional cuDNN configuration to prevent narrowing errors
+# tf.config.experimental.enable_op_determinism()
+
+# # Alternative GPU configuration if the above fails
+# try:
+#     # Disable XLA JIT compilation which can cause cuDNN issues
+#     tf.config.optimizer.set_jit(False)
+    
+#     # Set mixed precision policy to reduce memory pressure
+#     from tensorflow.keras import mixed_precision
+#     policy = mixed_precision.Policy('mixed_float16')
+#     mixed_precision.set_global_policy(policy)
+#     print("Mixed precision policy set to mixed_float16")
+# except Exception as e:
+#     print(f"Mixed precision configuration warning: {e}")
+
+# # Print GPU configuration info
+# print(f"TensorFlow version: {tf.__version__}")
+# print(f"GPU Available: {tf.config.list_physical_devices('GPU')}")
+# print(f"Built with CUDA: {tf.test.is_built_with_cuda()}")
+
+# # Test GPU memory allocation
+# try:
+#     with tf.device('/GPU:0'):
+#         test_tensor = tf.constant([[1.0, 2.0], [3.0, 4.0]])
+#         print(f"GPU test successful: {test_tensor.device}")
+# except Exception as e:
+#     print(f"GPU test failed: {e}")
+#     print("Falling back to CPU execution")
 
 
 ### -- Input Images -- ###
@@ -27,12 +72,12 @@ output_dir = os.getenv('OUTPUT_DIR', 'out_synth')
 print(f"The value of $OUTPUT_DIR is: {output_dir}.")
 
 
-# NORMAL Input Files and Template
-subject_nifti_paths = {
-    "OAS30001_MR_d0129": f"{input_dir}/test_input/original/OAS30001_MR_d0129/init/OAS30001_MR_d0129_t1.nii.gz",
-    "OAS30002_MR_d0371": f"{input_dir}/test_input/original/OAS30002_MR_d0371/init/OAS30002_MR_d0371_t1.nii.gz",
-}
-template_nifti_path = f"{input_dir}/test_input/original/template/template_t1.nii.gz"
+# # NORMAL Input Files and Template
+# subject_nifti_paths = {
+#     "OAS30001_MR_d0129": f"{input_dir}/test_input/original/OAS30001_MR_d0129/init/OAS30001_MR_d0129_t1.nii.gz",
+#     "OAS30002_MR_d0371": f"{input_dir}/test_input/original/OAS30002_MR_d0371/init/OAS30002_MR_d0371_t1.nii.gz",
+# }
+# template_nifti_path = f"{input_dir}/test_input/original/template/template_t1.nii.gz"
 
 # # INVERTED Input Files and Template
 # subject_nifti_paths = {
@@ -57,22 +102,22 @@ template_nifti_path = f"{input_dir}/test_input/original/template/template_t1.nii
 # }
 # template_nifti_path = f"{input_dir}/inverted/template/colin27_t1_tal_lin_INV.nii.gz"
 
-
-# Yuhan's Input Files and Template
+# # Yuhan's Input Files and Template
 # subject_nifti_paths = {
-#     "subj1": f"{input_dir}/mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz", # extremely high VN scan
-#     # "subj2": f"{input_dir}/mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz", # extremely high VN scan
-#     # "subj3": f"{input_dir}/mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz", # extremely small VN scan
-#     # "subj4": f"{input_dir}/mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz", # extremely small VN scan
-#     # "subj5": f"{input_dir}/mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz", # mean VN scan
-#     # "subj6": f"{input_dir}/mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz", # mean VN scan
+#     "137_S_4227_2011-09-21": f"{input_dir}/mri_samples/T1/137_S_4227_2011-09-21_T1_LPS.nii.gz", # extremely high VN scan
+#     "013_S_4236_2011-10-13": f"{input_dir}/mri_samples/T1/013_S_4236_2011-10-13_T1_LPS.nii.gz", # extremely high VN scan
+#     "019_S_6635_2020-01-28": f"{input_dir}/mri_samples/T1/019_S_6635_2020-01-28_T1_LPS.nii.gz", # extremely small VN scan
+#     "072_S_4226_2012-10-12": f"{input_dir}/mri_samples/T1/072_S_4226_2012-10-12_T1_LPS.nii.gz", # extremely small VN scan
+#     "027_S_0118_2008-02-23": f"{input_dir}/mri_samples/T1/027_S_0118_2008-02-23_T1_LPS.nii.gz", # mean VN scan
+#     # "023_S_1247_2007-02-21": f"{input_dir}/mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz", # mean VN scan
 # }
-# template_nifti_path = f"{input_dir}/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
+# template_nifti_path = f"{input_dir}/mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz", # mean VN scan
+# # template_nifti_path = f"{input_dir}/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
 ### -- Options -- ###
 target_roi = 'csf' # options: csf, gray_matter, white_matter, background
 
-segmentation = 'synthseg_freesurfer' # options: synthseg_freesurfer, synthseg_github, dlicv, fast
+segmentation = 'fast' # options: synthseg_freesurfer, synthseg_github, dlicv, fast
 
 affine = 'itk' # options: synthmorph_freesurfer, itk, flirt
 
@@ -931,3 +976,233 @@ for subj_id in subject_nifti_paths.keys():
     data = nii_file.get_fdata()
     total_sum = np.sum(data)
     print(f"The sum of the values in the final RAVENS map is: {total_sum}")
+
+    # --- Inverse Deformation Field Calculation and Application ---
+    print(f"\n===== INVERSE DEFORMATION FIELD CALCULATION =====")
+    
+    # Define paths for inverse transformation outputs
+    inverse_def_field = paths["t1_def_field"].replace('.nii.gz', '_inverse.nii.gz')
+    inverse_def_moved = paths["t1_def_reg"].replace('.nii.gz', '_inverse.nii.gz')
+    inverse_seg_def_moved = paths["t1_seg_def_reg"].replace('.nii.gz', '_inverse.nii.gz')
+    
+    if deformable == 'synthmorph_voxelmorph':
+        print(f'Computing inverse deformation field for {subj_id}...')
+        
+        # Compute the inverse of the deformation field
+        # The inverse field is the negative of the original field
+        inverse_def_field_data = -def_field_data
+        
+        # Save the inverse deformation field
+        t1_fixed.new(inverse_def_field_data).save(inverse_def_field)
+        print(f"Inverse deformation field saved to: {inverse_def_field}")
+        
+        # Apply inverse transformation to the deformed image to recover original
+        print(f'Applying inverse transformation to recover original image...')
+        
+        # Load the deformed image (this is the image in template space)
+        deformed_img = sf.load_volume(def_moved)
+        deformed_img_normalized = normalize(deformed_img)
+        
+        # Ensure the inverse deformation field has the correct shape for VoxelMorph
+        # VoxelMorph expects the deformation field to be in the same format as the original
+        inverse_def_field_vxm = inverse_def_field_data[None, ...]  # Add batch dimension
+        
+        # Apply inverse transformation
+        recovered_img = vxm.layers.SpatialTransformer(fill_value=0)((deformed_img_normalized, inverse_def_field_vxm))
+        
+        # Save the recovered image
+        t1_fixed.new(recovered_img[0]).save(inverse_def_moved)
+        print(f"Recovered image saved to: {inverse_def_moved}")
+        
+        # Apply inverse transformation to the deformed segmentation
+        print(f'Applying inverse transformation to recover original segmentation...')
+        
+        # Load the deformed segmentation
+        deformed_seg = sf.load_volume(seg_def_moved)
+        deformed_seg_normalized = normalize(deformed_seg)
+        
+        # Apply inverse transformation to segmentation
+        recovered_seg = vxm.layers.SpatialTransformer(interp_method='nearest', fill_value=0)((deformed_seg_normalized, inverse_def_field_vxm))
+        
+        # Save the recovered segmentation
+        t1_fixed.new(recovered_seg[0]).save(inverse_seg_def_moved)
+        print(f"Recovered segmentation saved to: {inverse_seg_def_moved}")
+        
+        # Calculate and save inverse Jacobian determinant
+        inverse_jac_det_path = jac_det_path.replace('.nii.gz', '_inverse.nii.gz')
+        inverse_jacobian_det = vxm.py.utils.jacobian_determinant(inverse_def_field_data)
+        inverse_jac_det_nii = nib.Nifti1Image(inverse_jacobian_det, affine_matrix)
+        nib.save(inverse_jac_det_nii, inverse_jac_det_path)
+        print(f"Inverse Jacobian determinant saved to: {inverse_jac_det_path}")
+        
+        # Calculate similarity metrics between original and recovered images
+        print(f'\n===== SIMILARITY ANALYSIS =====')
+        
+        # Load original and recovered images
+        original_img = sf.load_volume(subj_path)
+        recovered_img_vol = sf.load_volume(inverse_def_moved)
+        
+        # Ensure same shape for comparison
+        if original_img.shape != recovered_img_vol.shape:
+            print(f"Resampling recovered image to match original shape: {original_img.shape}")
+            recovered_img_vol = recovered_img_vol.resample_like(original_img, method='linear')
+        
+        # Calculate similarity metrics
+        from scipy.stats import pearsonr
+        from sklearn.metrics import mean_squared_error, mean_absolute_error
+        
+        # Flatten arrays for correlation calculation
+        orig_flat = original_img.data.flatten()
+        recov_flat = recovered_img_vol.data.flatten()
+        
+        # Remove any NaN values
+        valid_mask = ~(np.isnan(orig_flat) | np.isnan(recov_flat))
+        orig_clean = orig_flat[valid_mask]
+        recov_clean = recov_flat[valid_mask]
+        
+        if len(orig_clean) > 0:
+            # Pearson correlation
+            correlation, p_value = pearsonr(orig_clean, recov_clean)
+            
+            # Mean squared error
+            mse = mean_squared_error(orig_clean, recov_clean)
+            
+            # Mean absolute error
+            mae = mean_absolute_error(orig_clean, recov_clean)
+            
+            # Normalized cross-correlation
+            ncc = np.corrcoef(orig_clean, recov_clean)[0, 1]
+            
+            print(f"Similarity Metrics for {subj_id}:")
+            print(f"  Pearson Correlation: {correlation:.4f} (p-value: {p_value:.4f})")
+            print(f"  Mean Squared Error: {mse:.4f}")
+            print(f"  Mean Absolute Error: {mae:.4f}")
+            print(f"  Normalized Cross-Correlation: {ncc:.4f}")
+            
+            # Calculate volume similarity for segmentation
+            original_seg_vol = calculate_nifti_volume(output_filename)
+            recovered_seg_vol = calculate_nifti_volume(inverse_seg_def_moved)
+            seg_vol_similarity = recovered_seg_vol / original_seg_vol if original_seg_vol > 0 else 0
+            
+            print(f"  Segmentation Volume Similarity: {seg_vol_similarity:.4f}")
+            print(f"    Original Volume: {original_seg_vol:.2f} mm³")
+            print(f"    Recovered Volume: {recovered_seg_vol:.2f} mm³")
+        else:
+            print(f"Warning: No valid data for similarity calculation for {subj_id}")
+    
+    elif deformable == 'synthmorph_freesurfer':
+        print(f'Computing inverse deformation field for {subj_id} using FreeSurfer SynthMorph...')
+        
+        # Load the deformation field from FreeSurfer SynthMorph
+        def_field_data = nib.load(def_field).get_fdata()
+        print(f"FreeSurfer deformation field shape: {def_field_data.shape}")
+        print(f"FreeSurfer deformation field type: {def_field_data.dtype}")
+        
+        # Compute the inverse of the deformation field
+        # The inverse field is the negative of the original field
+        inverse_def_field_data = -def_field_data
+        
+        # Save the inverse deformation field
+        inverse_def_field_nii = nib.Nifti1Image(inverse_def_field_data, nib.load(def_field).affine)
+        nib.save(inverse_def_field_nii, inverse_def_field)
+        print(f"Inverse deformation field saved to: {inverse_def_field}")
+        
+        # Apply inverse transformation using VoxelMorph's SpatialTransformer
+        print(f'Applying inverse transformation to recover original image...')
+        
+        # Load the deformed image (this is the image in template space)
+        deformed_img = sf.load_volume(def_moved)
+        deformed_img_normalized = normalize(deformed_img)
+        
+        # Ensure the inverse deformation field has the correct shape for VoxelMorph
+        inverse_def_field_vxm = inverse_def_field_data[None, ...]  # Add batch dimension
+        
+        # Apply inverse transformation
+        recovered_img = vxm.layers.SpatialTransformer(fill_value=0)((deformed_img_normalized, inverse_def_field_vxm))
+        
+        # Save the recovered image using nibabel
+        recovered_img_nii = nib.Nifti1Image(recovered_img[0].numpy(), nib.load(def_moved).affine)
+        nib.save(recovered_img_nii, inverse_def_moved)
+        print(f"Recovered image saved to: {inverse_def_moved}")
+        
+        # Apply inverse transformation to the deformed segmentation
+        print(f'Applying inverse transformation to recover original segmentation...')
+        
+        # Load the deformed segmentation
+        deformed_seg = sf.load_volume(seg_def_moved)
+        deformed_seg_normalized = normalize(deformed_seg)
+        
+        # Apply inverse transformation to segmentation
+        recovered_seg = vxm.layers.SpatialTransformer(interp_method='nearest', fill_value=0)((deformed_seg_normalized, inverse_def_field_vxm))
+        
+        # Save the recovered segmentation using nibabel
+        recovered_seg_nii = nib.Nifti1Image(recovered_seg[0].numpy(), nib.load(seg_def_moved).affine)
+        nib.save(recovered_seg_nii, inverse_seg_def_moved)
+        print(f"Recovered segmentation saved to: {inverse_seg_def_moved}")
+        
+        # Calculate and save inverse Jacobian determinant
+        inverse_jac_det_path = jac_det_path.replace('.nii.gz', '_inverse.nii.gz')
+        inverse_jacobian_det = vxm.py.utils.jacobian_determinant(inverse_def_field_data)
+        inverse_jac_det_nii = nib.Nifti1Image(inverse_jacobian_det, affine_matrix)
+        nib.save(inverse_jac_det_nii, inverse_jac_det_path)
+        print(f"Inverse Jacobian determinant saved to: {inverse_jac_det_path}")
+        
+        # Calculate similarity metrics between original and recovered images
+        print(f'\n===== SIMILARITY ANALYSIS =====')
+        
+        # Load original and recovered images
+        original_img = sf.load_volume(subj_path)
+        recovered_img_vol = sf.load_volume(inverse_def_moved)
+        
+        # Ensure same shape for comparison
+        if original_img.shape != recovered_img_vol.shape:
+            print(f"Resampling recovered image to match original shape: {original_img.shape}")
+            recovered_img_vol = recovered_img_vol.resample_like(original_img, method='linear')
+        
+        # Calculate similarity metrics
+        from scipy.stats import pearsonr
+        from sklearn.metrics import mean_squared_error, mean_absolute_error
+        
+        # Flatten arrays for correlation calculation
+        orig_flat = original_img.data.flatten()
+        recov_flat = recovered_img_vol.data.flatten()
+        
+        # Remove any NaN values
+        valid_mask = ~(np.isnan(orig_flat) | np.isnan(recov_flat))
+        orig_clean = orig_flat[valid_mask]
+        recov_clean = recov_flat[valid_mask]
+        
+        if len(orig_clean) > 0:
+            # Pearson correlation
+            correlation, p_value = pearsonr(orig_clean, recov_clean)
+            
+            # Mean squared error
+            mse = mean_squared_error(orig_clean, recov_clean)
+            
+            # Mean absolute error
+            mae = mean_absolute_error(orig_clean, recov_clean)
+            
+            # Normalized cross-correlation
+            ncc = np.corrcoef(orig_clean, recov_clean)[0, 1]
+            
+            print(f"Similarity Metrics for {subj_id}:")
+            print(f"  Pearson Correlation: {correlation:.4f} (p-value: {p_value:.4f})")
+            print(f"  Mean Squared Error: {mse:.4f}")
+            print(f"  Mean Absolute Error: {mae:.4f}")
+            print(f"  Normalized Cross-Correlation: {ncc:.4f}")
+            
+            # Calculate volume similarity for segmentation
+            original_seg_vol = calculate_nifti_volume(output_filename)
+            recovered_seg_vol = calculate_nifti_volume(inverse_seg_def_moved)
+            seg_vol_similarity = recovered_seg_vol / original_seg_vol if original_seg_vol > 0 else 0
+            
+            print(f"  Segmentation Volume Similarity: {seg_vol_similarity:.4f}")
+            print(f"    Original Volume: {original_seg_vol:.2f} mm³")
+            print(f"    Recovered Volume: {recovered_seg_vol:.2f} mm³")
+        else:
+            print(f"Warning: No valid data for similarity calculation for {subj_id}")
+
+print(f"\n===== PIPELINE COMPLETED =====")
+print(f"All subjects processed successfully!")
+print(f"Output directory: {output_dir}")
+print(f"Inverse transformations have been computed and applied to demonstrate recovery to original space.")
