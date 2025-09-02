@@ -6,7 +6,6 @@
 #SBATCH --ntasks=1                              # Number of tasks (usually 1 for single-node jobs)
 #SBATCH --time=02:00:00                         # Time limit (D-HH:MM:SS)
 #SBATCH --verbose
-#SBATCH --output="$SCRIPT_DIR"/logs/synthmorph-cpu-%j.out
 
 
 # Anaconda

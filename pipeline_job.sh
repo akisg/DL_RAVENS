@@ -5,15 +5,12 @@ set -euo pipefail
 # Activate env
 source activate mri
 
-# Download weights file
-curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/brains-dice-vel-0.5-res-16-256f.h5
-
 # Optional modules (cluster-specific)
 module load freesurfer/8.1.0 || true
 
 export FSLOUTPUTTYPE=NIFTI_GZ
 
-export SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 print_usage() {
   echo "Usage: $0 --pipeline ants|synthmorph --template <template_t1.nii.gz> --subject <subject_t1.nii.gz> --outdir <output_dir> [--seg-method fast|synthseg_freesurfer|synthseg_github|dlicv] [--target-roi csf|gray_matter|white_matter|background] [--shape 256,256,256] [--voxel-size 1] [--force-cpu] [--device cpu|gpu]"
@@ -138,9 +135,19 @@ else
   export OUTPUT_DIR="$OUTDIR/synthmorph"
   mkdir -p "$OUTPUT_DIR"
 
+  # Download weights file
+  WEIGHTS_URL="https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/brains-dice-vel-0.5-res-16-256f.h5"
+  WEIGHTS_FILE=$(basename "$WEIGHTS_URL")
+  if [[ -f "$WEIGHTS_FILE" ]]; then
+    echo "Model weights already present: $WEIGHTS_FILE"
+  else
+    echo "Downloading model weights: $WEIGHTS_FILE"
+    curl -fL -O "$WEIGHTS_URL"
+  fi
+
   if [[ "$DEVICE" == "gpu" ]]; then
     # Submit GPU SynthMorph job (A100)
-    sbatch -- \
+    sbatch --output="$SCRIPT_DIR"/logs/synthmorph-a100-%j.out -- \
       "$SCRIPT_DIR"/synthmorph_a100_job.sh \
         "$DLICV_OUT" \
         "$SUBJECT_SEG" \
@@ -149,7 +156,7 @@ else
         "$TARGET_ROI"
   else
     # Submit CPU SynthMorph job
-    sbatch -- \
+    sbatch --output="$SCRIPT_DIR"/logs/synthmorph-cpu-%j.out -- \
       "$SCRIPT_DIR"/synthmorph_cpu_job.sh \
         "$DLICV_OUT" \
         "$SUBJECT_SEG" \

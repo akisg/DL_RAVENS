@@ -9,7 +9,6 @@
 #SBATCH --mail-type=NONE                         # Mail events (NONE, BEGIN, END, FAIL, ALL)
 #SBATCH --mail-user=giannoua@pennmedicine.upenn.edu
 #SBATCH --verbose
-#SBATCH --output="$SCRIPT_DIR"/logs/synthmorph-a100-%j.out
 
 # Anaconda
 # source /home/giannoua/miniconda3/bin/activate
