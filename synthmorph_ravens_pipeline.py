@@ -5,6 +5,7 @@ import numpy as np
 import os
 import io
 import time
+import argparse
 import surfa as sf
 import tensorflow as tf
 import voxelmorph as vxm
@@ -61,11 +62,7 @@ import SimpleITK as sitk
 #     print("Falling back to CPU execution")
 
 
-### -- Input Images -- ###
-
-# Read environment variable for input directory
-input_dir = os.getenv('INPUT_DIR', '../inputs')
-print(f"The value of $INPUT_DIR is: {input_dir}.")
+### -- Input/Output Configuration -- ###
 
 # Read environment variable for output directory
 output_dir = os.getenv('OUTPUT_DIR', 'out_synth')
@@ -114,7 +111,7 @@ print(f"The value of $OUTPUT_DIR is: {output_dir}.")
 # template_nifti_path = f"{input_dir}/mri_samples/T1/023_S_1247_2007-02-21_T1_LPS.nii.gz", # mean VN scan
 # # template_nifti_path = f"{input_dir}/mri_samples/template/BLSA_SPGR+MPRAGE_averagetemplate.nii.gz"
 
-### -- Options -- ###
+### -- Options (defaults; can be overridden by CLI) -- ###
 target_roi = 'csf' # options: csf, gray_matter, white_matter, background
 
 segmentation = 'fast' # options: synthseg_freesurfer, synthseg_github, dlicv, fast
@@ -122,8 +119,6 @@ segmentation = 'fast' # options: synthseg_freesurfer, synthseg_github, dlicv, fa
 affine = 'itk' # options: synthmorph_freesurfer, itk, flirt
 
 deformable = 'synthmorph_voxelmorph' # options: synthmorph_freesurfer, synthmorph_voxelmorph
-
-skull_strip = False  # options: True, False
 
 # shape = (128, 128, 128)
 shape = (256, 256, 256)
@@ -203,13 +198,33 @@ SEGMENTATION_LABELS = {
         'background': [0]
     }
 }
+def derive_subject_id(subject_image_path: str) -> str:
+    """Derive a subject identifier from the provided subject image path.
+
+    Strategy:
+    - Prefer the immediate parent directory name when it is not a generic folder
+      like 'init', 'in', 'T1', or 'template'.
+    - Otherwise, fall back to the file stem with common suffixes removed.
+    """
+    generic_dirs = {"init", "in", "T1", "template"}
+    parent_dir = os.path.basename(os.path.dirname(subject_image_path))
+    if parent_dir and parent_dir not in generic_dirs:
+        return parent_dir
+
+    fname = os.path.basename(subject_image_path)
+    stem = fname.replace('.nii.gz', '').replace('.nii', '')
+    suffixes = [
+        "_t1", "_T1", "-T1", "_T1_LPS", "_LPS", "_INV",
+        "_T1w", "_T1w_LPS", "_T1_LPS_reshaped"
+    ]
+    for s in suffixes:
+        if stem.endswith(s):
+            return stem[: -len(s)]
+    return stem
 
 
-# Get the target labels for the current configuration
-target_labels = SEGMENTATION_LABELS[segmentation][target_roi]
-print(f"Using segmentation method: {segmentation}")
-print(f"Target ROI: {target_roi}")
-print(f"Target labels: {target_labels}")
+
+target_labels = None  # will be assigned after CLI is parsed
 
 
 def calculate_volume_change_from_matrix(matrix: np.ndarray) -> float:
@@ -580,627 +595,521 @@ model = tf.keras.Model(model.inputs, model.references.pos_flow)
 model.load_weights('brains-dice-vel-0.5-res-16-256f.h5')
 
 
-# --- Step 1: Preprocessing Loop ---
-print("\n===== STEP 1: PREPROCESSING =====")
+# --- CLI Arguments: Single-subject mode ---
+parser = argparse.ArgumentParser(description="Run Step 3 (Registration) for a single subject.")
+parser.add_argument("subject_image", help="Path to subject image (preprocessed to required shape, LPS)")
+parser.add_argument("subject_segmentation", help="Path to subject segmentation corresponding to subject_image")
+parser.add_argument("template_image", help="Path to template image (preprocessed to required shape, LPS)")
+parser.add_argument("--seg-method", dest="seg_method", choices=["fast", "synthseg_freesurfer", "synthseg_github", "dlicv"], default=None, help="Segmentation method used to produce subject_segmentation (affects label mapping)")
+parser.add_argument("--target-roi", dest="target_roi", choices=["csf", "gray_matter", "white_matter", "background"], default=None, help="Target ROI for RAVENS mask creation")
+args = parser.parse_args()
 
-# Preprocess template image first (only once)
-orig_template_nii = template_nifti_path
-preproc_template_nii = f"{output_dir}/template/template_t1.nii.gz"
+subject_image_path = args.subject_image
+subject_seg_path = args.subject_segmentation
+template_path = args.template_image
 
-if not os.path.exists(preproc_template_nii):
-    print("Preprocessing template image ...")
-    if shape == (128, 128, 128):
-        template_vol = sf.load_volume(orig_template_nii).resize(voxsize=2).reshape(shape).reorient('LPS')
-    else:
-        template_vol = sf.load_volume(orig_template_nii).reshape(shape).reorient('LPS')
-    os.makedirs(os.path.dirname(preproc_template_nii), exist_ok=True)
-    template_vol.save(preproc_template_nii)
-else:
-    print(f"Preprocessed template image exists: {preproc_template_nii}")
+# Apply CLI overrides
+if args.seg_method is not None:
+    segmentation = args.seg_method
+if args.target_roi is not None:
+    target_roi = args.target_roi
 
-# Preprocess all subjects
-for subj_id in subject_nifti_paths.keys():
-    print(f"\n--- Preprocessing subject: {subj_id} ---")
-    
-    orig_subj_nii = subject_nifti_paths[subj_id]
-    preproc_subj_nii = f"{output_dir}/{subj_id}/init/{subj_id}_t1.nii.gz"
-    preproc_subj_skull_stripped = f"{output_dir}/{subj_id}/init/{subj_id}_t1_skull_stripped.nii.gz"
-    
-    # Preprocess subject image
-    if not os.path.exists(preproc_subj_nii):
-        print(f"Preprocessing subject image for {subj_id} ...")
-        subj_vol = sf.load_volume(orig_subj_nii).resample_like(template_vol, method='nearest')
-        os.makedirs(os.path.dirname(preproc_subj_nii), exist_ok=True)
-        subj_vol.save(preproc_subj_nii)
-    else:
-        print(f"Preprocessed subject image exists: {preproc_subj_nii}")
+# Determine target labels now that we know the final segmentation+ROI
+target_labels = SEGMENTATION_LABELS[segmentation][target_roi]
+print(f"Using segmentation method: {segmentation}")
+print(f"Target ROI: {target_roi}")
+print(f"Target labels: {target_labels}")
 
-    # Skull Stripping with BET
-    if skull_strip:
-        print(f"Skull Stripping subject image for {subj_id} ...")
-        import ants
-        import antspynet
-
-        # Load image
-        img = ants.image_read(preproc_subj_nii)
-
-        # Perform brain extraction
-        brain_mask = antspynet.brain_extraction(img, modality="t1")
-
-        # Apply mask and save
-        skull_stripped_img = img * brain_mask
-        ants.image_write(skull_stripped_img, preproc_subj_skull_stripped)
-    else:
-        print(f"Skipping skull stripping for {subj_id}")
-
-# --- Step 2: Segmentation Loop ---
-print("\n===== STEP 2: SEGMENTATION =====")
-
-# Segment template first (only once)
-template_path = preproc_template_nii
-if segmentation != 'fast':
-    NUMTHD = 8
-    
-    if segmentation == 'synthseg_freesurfer':
-        synthseg_command = "mri_synthseg"
-    elif segmentation == 'synthseg_github':
-        synthseg_command = "python ../SynthSeg/scripts/commands/SynthSeg_predict.py"
-
-    # Segment template
-    print(f'Segmenting template image...')
-    template_out_seg = os.path.join(f"{output_dir}/template/", 'template_t1_seg.nii.gz')
-    template_out_qc = os.path.join(f"{output_dir}/template/", 'template_t1_Seg_QC.csv')
-    template_out_vol = os.path.join(f"{output_dir}/template/", 'template_t1_Seg_Vol.csv')
-    template_out_post = os.path.join(f"{output_dir}/template/", 'template_t1_Seg_Post.nii.gz')
-    template_cmd = f'{freesurfer_prefix} {synthseg_command} --i {template_path} --o {template_out_seg} --robust --vol {template_out_vol} --qc {template_out_qc} --threads {NUMTHD} --cpu'
-
-    if not os.path.exists(template_out_seg):
-        print(f'About to run: {template_cmd}')
-        start_time = time.time()
-        os.system(template_cmd)
-        end_time = time.time()
-        synthseg_time = end_time - start_time
-        print(f'SynthSeg completed for template in {synthseg_time:.2f} seconds ({synthseg_time/60:.2f} minutes)')
-    else:
-        print(f'Template segmentation exists, skip: {template_out_seg}')
-
-# Segment all subjects
-for subj_id in subject_nifti_paths.keys():
-    print(f"\n--- Segmenting subject: {subj_id} ---")
-    
-    paths = get_subject_paths(subj_id)
-    out_seg = paths["t1_seg"]
-    output_filename = paths["t1_mask"]
-    
-    # Determine subject image path (skull stripped or not)
-    preproc_subj_nii = f"{output_dir}/{subj_id}/init/{subj_id}_t1.nii.gz"
-    preproc_subj_skull_stripped = f"{output_dir}/{subj_id}/init/{subj_id}_t1_skull_stripped.nii.gz"
-    
-    if skull_strip and os.path.exists(preproc_subj_skull_stripped):
-        subj_path = preproc_subj_skull_stripped
-    else:
-        subj_path = preproc_subj_nii
-
-    if segmentation == 'fast':
-        print(f"Performing Fast segmentation for {subj_id} ...")
-        out_seg = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_seg.nii.gz')
-
-        if not os.path.exists(out_seg):
-            os.makedirs(os.path.dirname(out_seg), exist_ok=True)
-            cmd = f'fast --nopve -o {out_seg} {subj_path}'
-            print(f'About to run: {cmd}')
-            os.system(cmd)
-        else:
-            print(f'Out file exists, skip: {out_seg}')
-    else:
-        # Segment subject
-        print(f'Segmenting image for {subj_id} ...')
-        out_seg = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_seg.nii.gz')
-        out_qc = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_Seg_QC.csv')
-        out_vol = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_Seg_Vol.csv')
-        out_post = os.path.join(f"{output_dir}/{subj_id}/init/", f'{subj_id}_t1_Seg_Post.nii.gz')
-        cmd = f'{freesurfer_prefix} {synthseg_command} --i {subj_path} --o {out_seg} --robust --vol {out_vol} --qc {out_qc} --threads {NUMTHD} --cpu'
-
-        if not os.path.exists(out_seg):
-            print(f'About to run: {cmd}')
-            start_time = time.time()
-            os.system(cmd)
-            end_time = time.time()
-            synthseg_time = end_time - start_time
-            print(f'SynthSeg completed for {subj_id} in {synthseg_time:.2f} seconds ({synthseg_time/60:.2f} minutes)')
-        else:
-            print(f'Out file exists, skip: {out_seg}')
+subj_id = derive_subject_id(subject_image_path)
+print(f"Derived subject id: {subj_id}")
 
 
 # --- Step 3: Registration Loop ---
 print("\n===== STEP 3: REGISTRATION =====")
 
-for subj_id in subject_nifti_paths.keys():
-    print(f"\n--- Registering subject: {subj_id} ---")
+print(f"\n--- Registering subject: {subj_id} ---")
+
+paths = get_subject_paths(subj_id)
+
+# Inputs from CLI
+subj_path = subject_image_path
+out_seg = subject_seg_path
+
+# Outputs
+output_filename = paths["t1_mask"]
+affine_moved = paths["t1_lin_reg"]
+matrix_filepath = paths["t1_trans"]
+seg_affine_moved = paths["t1_seg_lin_reg"]
+def_field = paths["t1_def_field"]
+def_moved = paths["t1_def_reg"]
+seg_def_moved = paths["t1_seg_def_reg"]
+jac_det_path = paths["jac_det"]
+ravens_path = paths["ravens"]
+ravens_temp_path = paths["ravens_temp"]
+
+
+# Load provided subject segmentation for downstream steps
+# t1_seg = sf.load_volume(out_seg).reshape(shape).reorient('LPS')
+t1_seg = sf.load_volume(out_seg).reorient('LPS')
+
+# --- Create Binary Mask ---
+seg_data = t1_seg.data
+mask_data = np.isin(seg_data, target_labels).astype(np.uint8)
+affine_matrix = np.asarray(t1_seg.geom.vox2world)
+os.makedirs(os.path.dirname(output_filename), exist_ok=True)
+csf_mask_nii = nib.Nifti1Image(mask_data, affine_matrix)
+nib.save(csf_mask_nii, output_filename)
+print(f"Binary mask saved to: {output_filename}")
+
+# --- Affine Registration ---
+# Options: 'synthmorph_freesurfer', 'flirt', 'itk'
+affine_moving = subj_path
+affine_fixed = template_path
+# Ensure output directory exists for the transform file
+os.makedirs(os.path.dirname(matrix_filepath), exist_ok=True)
+
+if affine == 'synthmorph_freesurfer':
+    # Estimate and save an affine transform trans.lta in FreeSurfer LTA format
+    cmd1 = f'{freesurfer_prefix} mri_synthmorph register -m affine -t {matrix_filepath} {affine_moving} {affine_fixed}'
+    # Apply an existing transform to an image
+    cmd2 = f'{freesurfer_prefix} mri_synthmorph apply {matrix_filepath} {affine_moving} {affine_moved}'
+    if not os.path.exists(affine_moved):
+        print(f'About to run: {cmd1}')
+        os.system(cmd1)
+        print(f'About to run: {cmd2}')
+        os.system(cmd2)
+    else:
+        print(f'Out file exists, skip: {affine_moved}')
+elif affine == 'flirt':
+    matrix_filepath = paths["t1_trans"].replace('.lta', '.mat')
+    cmd = f'flirt -in {affine_moving} -ref {affine_fixed} -out {affine_moved} -omat {matrix_filepath} -dof 12'
+    if not os.path.exists(affine_moved):
+        print(f'About to run: {cmd}')
+        os.system(cmd)
+    else:
+        print(f'Out file exists, skip: {affine_moved}')
+elif affine == 'itk':
+    # Perform ITK-based affine registration
+    registered_image, final_transform = itk_linear_register_nifti(
+        moving_image_path=affine_moving,
+        fixed_image_path=affine_fixed,
+        transform_type="affine",
+        register_as_image_type=sitk.sitkFloat32,
+        interpolator_type=sitk.sitkLinear
+    )
     
-    paths = get_subject_paths(subj_id)
-    subj_path = paths["t1"]
-    out_seg = paths["t1_seg"]
-    output_filename = paths["t1_mask"]
-    affine_moved = paths["t1_lin_reg"]
-    matrix_filepath = paths["t1_trans"]
-    seg_affine_moved = paths["t1_seg_lin_reg"]
-    def_field = paths["t1_def_field"]
-    def_moved = paths["t1_def_reg"]
-    seg_def_moved = paths["t1_seg_def_reg"]
-    jac_det_path = paths["jac_det"]
-    ravens_path = paths["ravens"]
-    ravens_temp_path = paths["ravens_temp"]
+    # Save the registered image
+    sitk.WriteImage(registered_image, affine_moved)
+    print(f'ITK registered image saved to: {affine_moved}')
+    
+    # Save the transform parameters for later use
+    transform_params = final_transform.GetParameters()
+    transform_matrix = parse_itk_transform(final_transform)
+    if transform_matrix is not None:
+        # Save transform matrix in a simple text format
+        matrix_filepath = paths["t1_trans"].replace('.lta', '_itk.txt')
+        np.savetxt(matrix_filepath, transform_matrix, fmt='%.6f')
+        print(f'ITK transform matrix saved to: {matrix_filepath}')
+    
+    # Store transform for later use in segmentation application
+    itk_final_transform = final_transform
+    itk_transform_matrix = transform_matrix
 
-
-    # Now use the subject's segmentation output for downstream steps
-    out_seg = os.path.join(f"{output_dir}/{subj_id}/init/", f"{subj_id}_t1_seg.nii.gz")
-    # t1_seg = sf.load_volume(out_seg).reshape(shape).reorient('LPS')
-    t1_seg = sf.load_volume(out_seg).reorient('LPS')
-
-    # --- Create Binary Mask ---
-    seg_data = t1_seg.data
-    mask_data = np.isin(seg_data, target_labels).astype(np.uint8)
-    affine_matrix = np.asarray(t1_seg.geom.vox2world)
-    csf_mask_nii = nib.Nifti1Image(mask_data, affine_matrix)
-    nib.save(csf_mask_nii, output_filename)
-    print(f"Binary mask saved to: {output_filename}")
-
-
-    # --- Affine Registration ---
-    # Options: 'synthmorph_freesurfer', 'flirt', 'itk'
-    affine_moving = subj_path
-    affine_fixed = template_path
-
-    # Ensure output directory exists for the transform file
-    os.makedirs(os.path.dirname(matrix_filepath), exist_ok=True)
-
-    if affine == 'synthmorph_freesurfer':
-        # Estimate and save an affine transform trans.lta in FreeSurfer LTA format
-        cmd1 = f'{freesurfer_prefix} mri_synthmorph register -m affine -t {matrix_filepath} {affine_moving} {affine_fixed}'
-        # Apply an existing transform to an image
-        cmd2 = f'{freesurfer_prefix} mri_synthmorph apply {matrix_filepath} {affine_moving} {affine_moved}'
-        if not os.path.exists(affine_moved):
-            print(f'About to run: {cmd1}')
-            os.system(cmd1)
-            print(f'About to run: {cmd2}')
-            os.system(cmd2)
-        else:
-            print(f'Out file exists, skip: {affine_moved}')
-    elif affine == 'flirt':
-        matrix_filepath = paths["t1_trans"].replace('.lta', '.mat')
-        cmd = f'flirt -in {affine_moving} -ref {affine_fixed} -out {affine_moved} -omat {matrix_filepath} -dof 12'
-        if not os.path.exists(affine_moved):
-            print(f'About to run: {cmd}')
-            os.system(cmd)
-        else:
-            print(f'Out file exists, skip: {affine_moved}')
-    elif affine == 'itk':
-        # Perform ITK-based affine registration
-        registered_image, final_transform = itk_linear_register_nifti(
-            moving_image_path=affine_moving,
-            fixed_image_path=affine_fixed,
-            transform_type="affine",
-            register_as_image_type=sitk.sitkFloat32,
-            interpolator_type=sitk.sitkLinear
-        )
-        
-        # Save the registered image
-        sitk.WriteImage(registered_image, affine_moved)
-        print(f'ITK registered image saved to: {affine_moved}')
-        
-        # Save the transform parameters for later use
-        transform_params = final_transform.GetParameters()
-        transform_matrix = parse_itk_transform(final_transform)
-        if transform_matrix is not None:
-            # Save transform matrix in a simple text format
-            matrix_filepath = paths["t1_trans"].replace('.lta', '_itk.txt')
-            np.savetxt(matrix_filepath, transform_matrix, fmt='%.6f')
-            print(f'ITK transform matrix saved to: {matrix_filepath}')
-        
-        # Store transform for later use in segmentation application
-        itk_final_transform = final_transform
-        itk_transform_matrix = transform_matrix
-
-    # --- Apply the affine step to the segmentation ---
-    seg_affine_moving = output_filename
-    if affine == 'synthmorph_freesurfer':
-        cmd = f'{freesurfer_prefix} mri_synthmorph apply -m nearest {matrix_filepath} {seg_affine_moving} {seg_affine_moved}'
-        if not os.path.exists(seg_affine_moved):
-            print(f'About to run: {cmd}')
-            os.system(cmd)
-        else:
-            print(f'Out file exists, skip: {seg_affine_moved}')
-    elif affine == 'flirt':
-        cmd = f'flirt -in {seg_affine_moving} -ref {affine_fixed} -out {seg_affine_moved} -init {matrix_filepath} -applyxfm'
-        if not os.path.exists(seg_affine_moved):
-            print(f'About to run: {cmd}')
-            os.system(cmd)
-        else:
-            print(f'Out file exists, skip: {seg_affine_moved}')
-    elif affine == 'itk':
-        # Apply the ITK transform to the segmentation mask
-        print(f'Applying ITK transform to segmentation mask...')
-        
-        # Load the segmentation mask
-        seg_mask = sitk.ReadImage(seg_affine_moving, sitk.sitkUInt8)
-        
-        # Create resampler for the segmentation
-        resampler = sitk.ResampleImageFilter()
-        resampler.SetReferenceImage(sitk.ReadImage(affine_fixed))
-        resampler.SetTransform(itk_final_transform)
-        resampler.SetInterpolator(sitk.sitkNearestNeighbor)
-        resampler.SetDefaultPixelValue(0)
-        
-        # Apply transform to segmentation
-        registered_seg = resampler.Execute(seg_mask)
-        
-        # Save the transformed segmentation
-        sitk.WriteImage(registered_seg, seg_affine_moved)
-        print(f'ITK transformed segmentation saved to: {seg_affine_moved}')
+# --- Apply the affine step to the segmentation ---
+seg_affine_moving = output_filename
+if affine == 'synthmorph_freesurfer':
+    cmd = f'{freesurfer_prefix} mri_synthmorph apply -m nearest {matrix_filepath} {seg_affine_moving} {seg_affine_moved}'
+    if not os.path.exists(seg_affine_moved):
+        print(f'About to run: {cmd}')
+        os.system(cmd)
+    else:
+        print(f'Out file exists, skip: {seg_affine_moved}')
+elif affine == 'flirt':
+    cmd = f'flirt -in {seg_affine_moving} -ref {affine_fixed} -out {seg_affine_moved} -init {matrix_filepath} -applyxfm'
+    if not os.path.exists(seg_affine_moved):
+        print(f'About to run: {cmd}')
+        os.system(cmd)
+    else:
+        print(f'Out file exists, skip: {seg_affine_moved}')
+elif affine == 'itk':
+    # Apply the ITK transform to the segmentation mask
+    print(f'Applying ITK transform to segmentation mask...')
+    
+    # Load the segmentation mask
+    seg_mask = sitk.ReadImage(seg_affine_moving, sitk.sitkUInt8)
+    
+    # Create resampler for the segmentation
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(sitk.ReadImage(affine_fixed))
+    resampler.SetTransform(itk_final_transform)
+    resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+    resampler.SetDefaultPixelValue(0)
+    
+    # Apply transform to segmentation
+    registered_seg = resampler.Execute(seg_mask)
+    
+    # Save the transformed segmentation
+    sitk.WriteImage(registered_seg, seg_affine_moved)
+    print(f'ITK transformed segmentation saved to: {seg_affine_moved}')
 
     # --- Calculate Scale Factor for the Affine Registration ---
-    if affine == "synthmorph_freesurfer":
-        lta_matrix = parse_freesurfer_lta_file(matrix_filepath)
-        if lta_matrix is not None:
-            scale_factor = calculate_volume_change_from_matrix(lta_matrix)
-            print(f"SynthMorph Volume Change Factor (k): {scale_factor:.4f}\n")
-    elif affine == 'flirt':
-        flirt_matrix = parse_flirt_mat_file(matrix_filepath)
-        if flirt_matrix is not None:
-            scale_factor = calculate_volume_change_from_matrix(flirt_matrix)
-            print(f"FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
+if affine == "synthmorph_freesurfer":
+    lta_matrix = parse_freesurfer_lta_file(matrix_filepath)
+    if lta_matrix is not None:
+        scale_factor = calculate_volume_change_from_matrix(lta_matrix)
+        print(f"SynthMorph Volume Change Factor (k): {scale_factor:.4f}\n")
+elif affine == 'flirt':
+    flirt_matrix = parse_flirt_mat_file(matrix_filepath)
+    if flirt_matrix is not None:
+        scale_factor = calculate_volume_change_from_matrix(flirt_matrix)
+        print(f"FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
 
-            scale_factor = calculate_physical_volume_change(flirt_matrix, subj_path, template_path)
-            print(f"FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
-    elif affine == 'itk':
-        # The transform returned by ITK maps the fixed space to the moving space.
-        # To find the volume change of the moving image, we need the determinant of the INVERSE transform.
-        inverse_transform = itk_final_transform.GetInverse()
-        inverse_matrix = parse_itk_transform(inverse_transform)
-        
-        if inverse_matrix is not None:
-            scale_factor = calculate_volume_change_from_matrix(inverse_matrix)
-            print(f"ITK Volume Change Factor (k): {scale_factor:.4f}\n")
-        else:
-            print("Warning: Could not calculate ITK scale factor from inverse matrix.")
-            scale_factor = 1.0
+        scale_factor = calculate_physical_volume_change(flirt_matrix, subj_path, template_path)
+        print(f"FLIRT Volume Change Factor (k): {scale_factor:.4f}\n")
+elif affine == 'itk':
+    # The transform returned by ITK maps the fixed space to the moving space.
+    # To find the volume change of the moving image, we need the determinant of the INVERSE transform.
+    inverse_transform = itk_final_transform.GetInverse()
+    inverse_matrix = parse_itk_transform(inverse_transform)
+    
+    if inverse_matrix is not None:
+        scale_factor = calculate_volume_change_from_matrix(inverse_matrix)
+        print(f"ITK Volume Change Factor (k): {scale_factor:.4f}\n")
+    else:
+        print("Warning: Could not calculate ITK scale factor from inverse matrix.")
+        scale_factor = 1.0
 
 
-    # --- Calculate Volumes for Validation ---
-    volume_1 = calculate_nifti_volume(seg_affine_moved)
-    print(f"\nCalculated Volume 1: {volume_1:.4f} mm³")
-    volume_2 = calculate_nifti_volume(output_filename)
-    print(f"\nCalculated Volume 2: {volume_2:.4f} mm³")
-    actual_scale_factor = volume_1 / volume_2
-    print(f"\nCalculated Scale Factor: {actual_scale_factor:.4f} mm³")
+# --- Calculate Volumes for Validation ---
+volume_1 = calculate_nifti_volume(seg_affine_moved)
+print(f"\nCalculated Volume 1: {volume_1:.4f} mm³")
+volume_2 = calculate_nifti_volume(output_filename)
+print(f"\nCalculated Volume 2: {volume_2:.4f} mm³")
+actual_scale_factor = volume_1 / volume_2
+print(f"\nCalculated Scale Factor: {actual_scale_factor:.4f} mm³")
 
     # --- Deformable Registration using the SynthMorph Freesurfer Command Line Interface ---
-    if deformable == 'synthmorph_freesurfer':
-        # Ensure output directory exists for the transform file
-        os.makedirs(os.path.dirname(def_field), exist_ok=True)
+if deformable == 'synthmorph_freesurfer':
+    # Ensure output directory exists for the transform file
+    os.makedirs(os.path.dirname(def_field), exist_ok=True)
 
-        cmd1 = f'{freesurfer_prefix} mri_synthmorph register -m deform -t {def_field} {affine_moved} {template_path}'
-        cmd2 = f'{freesurfer_prefix} mri_synthmorph apply {def_field} {affine_moved} {def_moved}'
-        cmd3 = f'{freesurfer_prefix} mri_synthmorph apply -m nearest {def_field} {seg_affine_moved} {seg_def_moved}'
-        if not os.path.exists(seg_def_moved):
-            print(f'About to run: {cmd1}')
-            os.system(cmd1)
-            print(f'About to run: {cmd2}')
-            os.system(cmd2)
-            print(f'About to run: {cmd3}')
-            os.system(cmd3)
-        else:
-            print(f'Out file exists, skip: {seg_def_moved}')
+    cmd1 = f'{freesurfer_prefix} mri_synthmorph register -m deform -t {def_field} {affine_moved} {template_path}'
+    cmd2 = f'{freesurfer_prefix} mri_synthmorph apply {def_field} {affine_moved} {def_moved}'
+    cmd3 = f'{freesurfer_prefix} mri_synthmorph apply -m nearest {def_field} {seg_affine_moved} {seg_def_moved}'
+    if not os.path.exists(seg_def_moved):
+        print(f'About to run: {cmd1}')
+        os.system(cmd1)
+        print(f'About to run: {cmd2}')
+        os.system(cmd2)
+        print(f'About to run: {cmd3}')
+        os.system(cmd3)
+    else:
+        print(f'Out file exists, skip: {seg_def_moved}')
 
-        # Open the def_field file and get the data
-        def_field_data = nib.load(def_field).get_fdata()
-        print(f"Def_field data shape: {def_field_data.shape}")
-        print(f"Def_field data type: {def_field_data.dtype}")
-        print(f"Def_field data min: {def_field_data.min()}")
-        print(f"Def_field data max: {def_field_data.max()}")
-        
-        # Calculate the Jacobian determinant of the deformation field
-        def_field_data = np.squeeze(def_field_data)  # Remove singleton dimensions if present
-        
-
-
-    # --- Deformable Registration using the SynthMorph VoxelMorph Interface ---
-    elif deformable == 'synthmorph_voxelmorph':
-        print(f'Performing Deformable Registration using VoxelMorph ...')
-        t1_fixed = sf.load_volume(affine_fixed)
-        t1_moving = sf.load_volume(affine_moved)
-
-        moving = normalize(t1_moving)
-        fixed = normalize(t1_fixed)
-        trans = model.predict((moving, fixed))
-        moved = vxm.layers.SpatialTransformer(fill_value=0)((moving, trans))
-        os.makedirs(os.path.dirname(def_field), exist_ok=True)
-        t1_fixed.new(trans[0]).save(def_field)
-        t1_fixed.new(moved[0]).save(def_moved)
-
-        # --- Deformable Registration of Segmented Image ---
-        # Define the template segmentation path based on the segmentation step
-        template_seg_path = os.path.join(f"{output_dir}/template/", "template_t1_seg.nii.gz")
-        t1_fixed_seg = sf.load_volume(template_seg_path)
-        t1_moving_seg = sf.load_volume(seg_affine_moved)
-
-        # --- Apply Deformation Field to Segmented Image ---
-        moving_seg = normalize(t1_moving_seg)
-        fixed_seg = normalize(t1_fixed_seg)
-        moved_seg = vxm.layers.SpatialTransformer(interp_method='nearest', fill_value=0)((moving_seg, trans))
-
-        os.makedirs(os.path.dirname(seg_def_moved), exist_ok=True)
-        t1_fixed.new(moved_seg[0]).save(seg_def_moved)
-
-        # Save the deformation field data
-        def_field_data = trans[0]
-        print(f"Def_field data shape: {def_field_data.shape}")
-        print(f"Def_field data type: {def_field_data.dtype}")
-        print(f"Def_field data min: {def_field_data.min()}")
-        print(f"Def_field data max: {def_field_data.max()}")
-
+    # Open the def_field file and get the data
+    def_field_data = nib.load(def_field).get_fdata()
+    print(f"Def_field data shape: {def_field_data.shape}")
+    print(f"Def_field data type: {def_field_data.dtype}")
+    print(f"Def_field data min: {def_field_data.min()}")
+    print(f"Def_field data max: {def_field_data.max()}")
+    
     # Calculate the Jacobian determinant of the deformation field
-    jacobian_det = vxm.py.utils.jacobian_determinant(def_field_data)
-    print(f"Jacobian determinant shape: {jacobian_det.shape}")
-    print(f"Jacobian determinant type: {jacobian_det.dtype}")
-    print(f"Jacobian determinant min: {jacobian_det.min()}")
-    print(f"Jacobian determinant max: {jacobian_det.max()}")
+    def_field_data = np.squeeze(def_field_data)  # Remove singleton dimensions if present
 
-    # Save the Jacobian determinant to a file
-    jac_det_nii = nib.Nifti1Image(jacobian_det, affine_matrix)
-    nib.save(jac_det_nii, jac_det_path)
-    print(f"Jacobian determinant saved to: {jac_det_path}")
 
-    # --- Calculate Ravens Map ---
-    def calc_ravens(f_jac, f_seg, f_out):
-        nii_jac = nib.load(f_jac)
-        img_jac = nii_jac.get_fdata()
-        nii_seg = nib.load(f_seg)
-        nii_seg_data = nii_seg.get_fdata()
-        ravens = img_jac * nii_seg_data
-        nii_out = nib.Nifti1Image(ravens, nii_jac.affine)
-        # nib.save(nii_out, ravens_temp_path)
-        # print(f"Temp RAVENS map saved to: {ravens_temp_path}")
-        ravens /= scale_factor
-        nii_out = nib.Nifti1Image(ravens, nii_jac.affine)
-        nib.save(nii_out, f_out)
-        print(f"RAVENS map saved to: {f_out}")
 
-    calc_ravens(jac_det_path, seg_def_moved, ravens_path)
+# --- Deformable Registration using the SynthMorph VoxelMorph Interface ---
+elif deformable == 'synthmorph_voxelmorph':
+    print(f'Performing Deformable Registration using VoxelMorph ...')
+    t1_fixed = sf.load_volume(affine_fixed)
+    t1_moving = sf.load_volume(affine_moved)
 
-    # --- Print Sums for Debugging ---
-    print(f"\nThe volume of the original mask is: {volume_2}")
+    moving = normalize(t1_moving)
+    fixed = normalize(t1_fixed)
+    trans = model.predict((moving, fixed))
+    moved = vxm.layers.SpatialTransformer(fill_value=0)((moving, trans))
+    os.makedirs(os.path.dirname(def_field), exist_ok=True)
+    t1_fixed.new(trans[0]).save(def_field)
+    t1_fixed.new(moved[0]).save(def_moved)
 
-    nii_file = nib.load(ravens_path)
-    data = nii_file.get_fdata()
-    total_sum = np.sum(data)
-    print(f"The sum of the values in the final RAVENS map is: {total_sum}")
+    # --- Deformable Registration of Segmented Image ---
+    t1_moving_seg = sf.load_volume(seg_affine_moved)
 
-    # --- Inverse Deformation Field Calculation and Application ---
-    print(f"\n===== INVERSE DEFORMATION FIELD CALCULATION =====")
+    # --- Apply Deformation Field to Segmented Image ---
+    moving_seg = normalize(t1_moving_seg)
+    moved_seg = vxm.layers.SpatialTransformer(interp_method='nearest', fill_value=0)((moving_seg, trans))
+
+    os.makedirs(os.path.dirname(seg_def_moved), exist_ok=True)
+    t1_fixed.new(moved_seg[0]).save(seg_def_moved)
+
+    # Save the deformation field data
+    def_field_data = trans[0]
+    print(f"Def_field data shape: {def_field_data.shape}")
+    print(f"Def_field data type: {def_field_data.dtype}")
+    print(f"Def_field data min: {def_field_data.min()}")
+    print(f"Def_field data max: {def_field_data.max()}")
+
+# Calculate the Jacobian determinant of the deformation field
+jacobian_det = vxm.py.utils.jacobian_determinant(def_field_data)
+print(f"Jacobian determinant shape: {jacobian_det.shape}")
+print(f"Jacobian determinant type: {jacobian_det.dtype}")
+print(f"Jacobian determinant min: {jacobian_det.min()}")
+print(f"Jacobian determinant max: {jacobian_det.max()}")
+
+# Save the Jacobian determinant to a file
+jac_det_nii = nib.Nifti1Image(jacobian_det, affine_matrix)
+nib.save(jac_det_nii, jac_det_path)
+print(f"Jacobian determinant saved to: {jac_det_path}")
+
+## --- Calculate Ravens Map ---
+def calc_ravens(f_jac, f_seg, f_out):
+    nii_jac = nib.load(f_jac)
+    img_jac = nii_jac.get_fdata()
+    nii_seg = nib.load(f_seg)
+    nii_seg_data = nii_seg.get_fdata()
+    ravens = img_jac * nii_seg_data
+    nii_out = nib.Nifti1Image(ravens, nii_jac.affine)
+    # nib.save(nii_out, ravens_temp_path)
+    # print(f"Temp RAVENS map saved to: {ravens_temp_path}")
+    ravens /= scale_factor
+    nii_out = nib.Nifti1Image(ravens, nii_jac.affine)
+    nib.save(nii_out, f_out)
+    print(f"RAVENS map saved to: {f_out}")
+
+calc_ravens(jac_det_path, seg_def_moved, ravens_path)
+
+## --- Print Sums for Debugging ---
+print(f"\nThe volume of the original mask is: {volume_2}")
+
+nii_file = nib.load(ravens_path)
+data = nii_file.get_fdata()
+total_sum = np.sum(data)
+print(f"The sum of the values in the final RAVENS map is: {total_sum}")
+
+## --- Inverse Deformation Field Calculation and Application ---
+print(f"\n===== INVERSE DEFORMATION FIELD CALCULATION =====")
+
+# Define paths for inverse transformation outputs
+inverse_def_field = paths["t1_def_field"].replace('.nii.gz', '_inverse.nii.gz')
+inverse_def_moved = paths["t1_def_reg"].replace('.nii.gz', '_inverse.nii.gz')
+inverse_seg_def_moved = paths["t1_seg_def_reg"].replace('.nii.gz', '_inverse.nii.gz')
+
+if deformable == 'synthmorph_voxelmorph':
+    print(f'Computing inverse deformation field for {subj_id}...')
     
-    # Define paths for inverse transformation outputs
-    inverse_def_field = paths["t1_def_field"].replace('.nii.gz', '_inverse.nii.gz')
-    inverse_def_moved = paths["t1_def_reg"].replace('.nii.gz', '_inverse.nii.gz')
-    inverse_seg_def_moved = paths["t1_seg_def_reg"].replace('.nii.gz', '_inverse.nii.gz')
+    # Compute the inverse of the deformation field
+    # The inverse field is the negative of the original field
+    inverse_def_field_data = -def_field_data
     
-    if deformable == 'synthmorph_voxelmorph':
-        print(f'Computing inverse deformation field for {subj_id}...')
-        
-        # Compute the inverse of the deformation field
-        # The inverse field is the negative of the original field
-        inverse_def_field_data = -def_field_data
-        
-        # Save the inverse deformation field
-        t1_fixed.new(inverse_def_field_data).save(inverse_def_field)
-        print(f"Inverse deformation field saved to: {inverse_def_field}")
-        
-        # Apply inverse transformation to the deformed image to recover original
-        print(f'Applying inverse transformation to recover original image...')
-        
-        # Load the deformed image (this is the image in template space)
-        deformed_img = sf.load_volume(def_moved)
-        deformed_img_normalized = normalize(deformed_img)
-        
-        # Ensure the inverse deformation field has the correct shape for VoxelMorph
-        # VoxelMorph expects the deformation field to be in the same format as the original
-        inverse_def_field_vxm = inverse_def_field_data[None, ...]  # Add batch dimension
-        
-        # Apply inverse transformation
-        recovered_img = vxm.layers.SpatialTransformer(fill_value=0)((deformed_img_normalized, inverse_def_field_vxm))
-        
-        # Save the recovered image
-        t1_fixed.new(recovered_img[0]).save(inverse_def_moved)
-        print(f"Recovered image saved to: {inverse_def_moved}")
-        
-        # Apply inverse transformation to the deformed segmentation
-        print(f'Applying inverse transformation to recover original segmentation...')
-        
-        # Load the deformed segmentation
-        deformed_seg = sf.load_volume(seg_def_moved)
-        deformed_seg_normalized = normalize(deformed_seg)
-        
-        # Apply inverse transformation to segmentation
-        recovered_seg = vxm.layers.SpatialTransformer(interp_method='nearest', fill_value=0)((deformed_seg_normalized, inverse_def_field_vxm))
-        
-        # Save the recovered segmentation
-        t1_fixed.new(recovered_seg[0]).save(inverse_seg_def_moved)
-        print(f"Recovered segmentation saved to: {inverse_seg_def_moved}")
-        
-        # Calculate and save inverse Jacobian determinant
-        inverse_jac_det_path = jac_det_path.replace('.nii.gz', '_inverse.nii.gz')
-        inverse_jacobian_det = vxm.py.utils.jacobian_determinant(inverse_def_field_data)
-        inverse_jac_det_nii = nib.Nifti1Image(inverse_jacobian_det, affine_matrix)
-        nib.save(inverse_jac_det_nii, inverse_jac_det_path)
-        print(f"Inverse Jacobian determinant saved to: {inverse_jac_det_path}")
-        
-        # Calculate similarity metrics between original and recovered images
-        print(f'\n===== SIMILARITY ANALYSIS =====')
-        
-        # Load original and recovered images
-        original_img = sf.load_volume(subj_path)
-        recovered_img_vol = sf.load_volume(inverse_def_moved)
-        
-        # Ensure same shape for comparison
-        if original_img.shape != recovered_img_vol.shape:
-            print(f"Resampling recovered image to match original shape: {original_img.shape}")
-            recovered_img_vol = recovered_img_vol.resample_like(original_img, method='linear')
-        
-        # Calculate similarity metrics
-        from scipy.stats import pearsonr
-        from sklearn.metrics import mean_squared_error, mean_absolute_error
-        
-        # Flatten arrays for correlation calculation
-        orig_flat = original_img.data.flatten()
-        recov_flat = recovered_img_vol.data.flatten()
-        
-        # Remove any NaN values
-        valid_mask = ~(np.isnan(orig_flat) | np.isnan(recov_flat))
-        orig_clean = orig_flat[valid_mask]
-        recov_clean = recov_flat[valid_mask]
-        
-        if len(orig_clean) > 0:
-            # Pearson correlation
-            correlation, p_value = pearsonr(orig_clean, recov_clean)
-            
-            # Mean squared error
-            mse = mean_squared_error(orig_clean, recov_clean)
-            
-            # Mean absolute error
-            mae = mean_absolute_error(orig_clean, recov_clean)
-            
-            # Normalized cross-correlation
-            ncc = np.corrcoef(orig_clean, recov_clean)[0, 1]
-            
-            print(f"Similarity Metrics for {subj_id}:")
-            print(f"  Pearson Correlation: {correlation:.4f} (p-value: {p_value:.4f})")
-            print(f"  Mean Squared Error: {mse:.4f}")
-            print(f"  Mean Absolute Error: {mae:.4f}")
-            print(f"  Normalized Cross-Correlation: {ncc:.4f}")
-            
-            # Calculate volume similarity for segmentation
-            original_seg_vol = calculate_nifti_volume(output_filename)
-            recovered_seg_vol = calculate_nifti_volume(inverse_seg_def_moved)
-            seg_vol_similarity = recovered_seg_vol / original_seg_vol if original_seg_vol > 0 else 0
-            
-            print(f"  Segmentation Volume Similarity: {seg_vol_similarity:.4f}")
-            print(f"    Original Volume: {original_seg_vol:.2f} mm³")
-            print(f"    Recovered Volume: {recovered_seg_vol:.2f} mm³")
-        else:
-            print(f"Warning: No valid data for similarity calculation for {subj_id}")
+    # Save the inverse deformation field
+    t1_fixed.new(inverse_def_field_data).save(inverse_def_field)
+    print(f"Inverse deformation field saved to: {inverse_def_field}")
     
-    elif deformable == 'synthmorph_freesurfer':
-        print(f'Computing inverse deformation field for {subj_id} using FreeSurfer SynthMorph...')
+    # Apply inverse transformation to the deformed image to recover original
+    print(f'Applying inverse transformation to recover original image...')
+    
+    # Load the deformed image (this is the image in template space)
+    deformed_img = sf.load_volume(def_moved)
+    deformed_img_normalized = normalize(deformed_img)
+    
+    # Ensure the inverse deformation field has the correct shape for VoxelMorph
+    # VoxelMorph expects the deformation field to be in the same format as the original
+    inverse_def_field_vxm = inverse_def_field_data[None, ...]  # Add batch dimension
+    
+    # Apply inverse transformation
+    recovered_img = vxm.layers.SpatialTransformer(fill_value=0)((deformed_img_normalized, inverse_def_field_vxm))
+    
+    # Save the recovered image
+    t1_fixed.new(recovered_img[0]).save(inverse_def_moved)
+    print(f"Recovered image saved to: {inverse_def_moved}")
+    
+    # Apply inverse transformation to the deformed segmentation
+    print(f'Applying inverse transformation to recover original segmentation...')
+    
+    # Load the deformed segmentation
+    deformed_seg = sf.load_volume(seg_def_moved)
+    deformed_seg_normalized = normalize(deformed_seg)
+    
+    # Apply inverse transformation to segmentation
+    recovered_seg = vxm.layers.SpatialTransformer(interp_method='nearest', fill_value=0)((deformed_seg_normalized, inverse_def_field_vxm))
+    
+    # Save the recovered segmentation
+    t1_fixed.new(recovered_seg[0]).save(inverse_seg_def_moved)
+    print(f"Recovered segmentation saved to: {inverse_seg_def_moved}")
+    
+    # Calculate and save inverse Jacobian determinant
+    inverse_jac_det_path = jac_det_path.replace('.nii.gz', '_inverse.nii.gz')
+    inverse_jacobian_det = vxm.py.utils.jacobian_determinant(inverse_def_field_data)
+    inverse_jac_det_nii = nib.Nifti1Image(inverse_jacobian_det, affine_matrix)
+    nib.save(inverse_jac_det_nii, inverse_jac_det_path)
+    print(f"Inverse Jacobian determinant saved to: {inverse_jac_det_path}")
+    
+    # Calculate similarity metrics between original and recovered images
+    print(f'\n===== SIMILARITY ANALYSIS =====')
+    
+    # Load original and recovered images
+    original_img = sf.load_volume(subj_path)
+    recovered_img_vol = sf.load_volume(inverse_def_moved)
+    
+    # Ensure same shape for comparison
+    if original_img.shape != recovered_img_vol.shape:
+        print(f"Resampling recovered image to match original shape: {original_img.shape}")
+        recovered_img_vol = recovered_img_vol.resample_like(original_img, method='linear')
+    
+    # Calculate similarity metrics
+    from scipy.stats import pearsonr
+    from sklearn.metrics import mean_squared_error, mean_absolute_error
+    
+    # Flatten arrays for correlation calculation
+    orig_flat = original_img.data.flatten()
+    recov_flat = recovered_img_vol.data.flatten()
+    
+    # Remove any NaN values
+    valid_mask = ~(np.isnan(orig_flat) | np.isnan(recov_flat))
+    orig_clean = orig_flat[valid_mask]
+    recov_clean = recov_flat[valid_mask]
+    
+    if len(orig_clean) > 0:
+        # Pearson correlation
+        correlation, p_value = pearsonr(orig_clean, recov_clean)
         
-        # Load the deformation field from FreeSurfer SynthMorph
-        def_field_data = nib.load(def_field).get_fdata()
-        print(f"FreeSurfer deformation field shape: {def_field_data.shape}")
-        print(f"FreeSurfer deformation field type: {def_field_data.dtype}")
+        # Mean squared error
+        mse = mean_squared_error(orig_clean, recov_clean)
         
-        # Compute the inverse of the deformation field
-        # The inverse field is the negative of the original field
-        inverse_def_field_data = -def_field_data
+        # Mean absolute error
+        mae = mean_absolute_error(orig_clean, recov_clean)
         
-        # Save the inverse deformation field
-        inverse_def_field_nii = nib.Nifti1Image(inverse_def_field_data, nib.load(def_field).affine)
-        nib.save(inverse_def_field_nii, inverse_def_field)
-        print(f"Inverse deformation field saved to: {inverse_def_field}")
+        # Normalized cross-correlation
+        ncc = np.corrcoef(orig_clean, recov_clean)[0, 1]
         
-        # Apply inverse transformation using VoxelMorph's SpatialTransformer
-        print(f'Applying inverse transformation to recover original image...')
+        print(f"Similarity Metrics for {subj_id}:")
+        print(f"  Pearson Correlation: {correlation:.4f} (p-value: {p_value:.4f})")
+        print(f"  Mean Squared Error: {mse:.4f}")
+        print(f"  Mean Absolute Error: {mae:.4f}")
+        print(f"  Normalized Cross-Correlation: {ncc:.4f}")
         
-        # Load the deformed image (this is the image in template space)
-        deformed_img = sf.load_volume(def_moved)
-        deformed_img_normalized = normalize(deformed_img)
+        # Calculate volume similarity for segmentation
+        original_seg_vol = calculate_nifti_volume(output_filename)
+        recovered_seg_vol = calculate_nifti_volume(inverse_seg_def_moved)
+        seg_vol_similarity = recovered_seg_vol / original_seg_vol if original_seg_vol > 0 else 0
         
-        # Ensure the inverse deformation field has the correct shape for VoxelMorph
-        inverse_def_field_vxm = inverse_def_field_data[None, ...]  # Add batch dimension
+        print(f"  Segmentation Volume Similarity: {seg_vol_similarity:.4f}")
+        print(f"    Original Volume: {original_seg_vol:.2f} mm³")
+        print(f"    Recovered Volume: {recovered_seg_vol:.2f} mm³")
+    else:
+        print(f"Warning: No valid data for similarity calculation for {subj_id}")
+    
+elif deformable == 'synthmorph_freesurfer':
+    print(f'Computing inverse deformation field for {subj_id} using FreeSurfer SynthMorph...')
+    
+    # Load the deformation field from FreeSurfer SynthMorph
+    def_field_data = nib.load(def_field).get_fdata()
+    print(f"FreeSurfer deformation field shape: {def_field_data.shape}")
+    print(f"FreeSurfer deformation field type: {def_field_data.dtype}")
+    
+    # Compute the inverse of the deformation field
+    # The inverse field is the negative of the original field
+    inverse_def_field_data = -def_field_data
+    
+    # Save the inverse deformation field
+    inverse_def_field_nii = nib.Nifti1Image(inverse_def_field_data, nib.load(def_field).affine)
+    nib.save(inverse_def_field_nii, inverse_def_field)
+    print(f"Inverse deformation field saved to: {inverse_def_field}")
+    
+    # Apply inverse transformation using VoxelMorph's SpatialTransformer
+    print(f'Applying inverse transformation to recover original image...')
+    
+    # Load the deformed image (this is the image in template space)
+    deformed_img = sf.load_volume(def_moved)
+    deformed_img_normalized = normalize(deformed_img)
+    
+    # Ensure the inverse deformation field has the correct shape for VoxelMorph
+    inverse_def_field_vxm = inverse_def_field_data[None, ...]  # Add batch dimension
+    
+    # Apply inverse transformation
+    recovered_img = vxm.layers.SpatialTransformer(fill_value=0)((deformed_img_normalized, inverse_def_field_vxm))
+    
+    # Save the recovered image using nibabel
+    recovered_img_nii = nib.Nifti1Image(recovered_img[0].numpy(), nib.load(def_moved).affine)
+    nib.save(recovered_img_nii, inverse_def_moved)
+    print(f"Recovered image saved to: {inverse_def_moved}")
+    
+    # Apply inverse transformation to the deformed segmentation
+    print(f'Applying inverse transformation to recover original segmentation...')
+    
+    # Load the deformed segmentation
+    deformed_seg = sf.load_volume(seg_def_moved)
+    deformed_seg_normalized = normalize(deformed_seg)
+    
+    # Apply inverse transformation to segmentation
+    recovered_seg = vxm.layers.SpatialTransformer(interp_method='nearest', fill_value=0)((deformed_seg_normalized, inverse_def_field_vxm))
+    
+    # Save the recovered segmentation using nibabel
+    recovered_seg_nii = nib.Nifti1Image(recovered_seg[0].numpy(), nib.load(seg_def_moved).affine)
+    nib.save(recovered_seg_nii, inverse_seg_def_moved)
+    print(f"Recovered segmentation saved to: {inverse_seg_def_moved}")
+    
+    # Calculate and save inverse Jacobian determinant
+    inverse_jac_det_path = jac_det_path.replace('.nii.gz', '_inverse.nii.gz')
+    inverse_jacobian_det = vxm.py.utils.jacobian_determinant(inverse_def_field_data)
+    inverse_jac_det_nii = nib.Nifti1Image(inverse_jacobian_det, affine_matrix)
+    nib.save(inverse_jac_det_nii, inverse_jac_det_path)
+    print(f"Inverse Jacobian determinant saved to: {inverse_jac_det_path}")
+    
+    # Calculate similarity metrics between original and recovered images
+    print(f'\n===== SIMILARITY ANALYSIS =====')
+    
+    # Load original and recovered images
+    original_img = sf.load_volume(subj_path)
+    recovered_img_vol = sf.load_volume(inverse_def_moved)
+    
+    # Ensure same shape for comparison
+    if original_img.shape != recovered_img_vol.shape:
+        print(f"Resampling recovered image to match original shape: {original_img.shape}")
+        recovered_img_vol = recovered_img_vol.resample_like(original_img, method='linear')
+    
+    # Calculate similarity metrics
+    from scipy.stats import pearsonr
+    from sklearn.metrics import mean_squared_error, mean_absolute_error
+    
+    # Flatten arrays for correlation calculation
+    orig_flat = original_img.data.flatten()
+    recov_flat = recovered_img_vol.data.flatten()
+    
+    # Remove any NaN values
+    valid_mask = ~(np.isnan(orig_flat) | np.isnan(recov_flat))
+    orig_clean = orig_flat[valid_mask]
+    recov_clean = recov_flat[valid_mask]
+    
+    if len(orig_clean) > 0:
+        # Pearson correlation
+        correlation, p_value = pearsonr(orig_clean, recov_clean)
         
-        # Apply inverse transformation
-        recovered_img = vxm.layers.SpatialTransformer(fill_value=0)((deformed_img_normalized, inverse_def_field_vxm))
+        # Mean squared error
+        mse = mean_squared_error(orig_clean, recov_clean)
         
-        # Save the recovered image using nibabel
-        recovered_img_nii = nib.Nifti1Image(recovered_img[0].numpy(), nib.load(def_moved).affine)
-        nib.save(recovered_img_nii, inverse_def_moved)
-        print(f"Recovered image saved to: {inverse_def_moved}")
+        # Mean absolute error
+        mae = mean_absolute_error(orig_clean, recov_clean)
         
-        # Apply inverse transformation to the deformed segmentation
-        print(f'Applying inverse transformation to recover original segmentation...')
+        # Normalized cross-correlation
+        ncc = np.corrcoef(orig_clean, recov_clean)[0, 1]
         
-        # Load the deformed segmentation
-        deformed_seg = sf.load_volume(seg_def_moved)
-        deformed_seg_normalized = normalize(deformed_seg)
+        print(f"Similarity Metrics for {subj_id}:")
+        print(f"  Pearson Correlation: {correlation:.4f} (p-value: {p_value:.4f})")
+        print(f"  Mean Squared Error: {mse:.4f}")
+        print(f"  Mean Absolute Error: {mae:.4f}")
+        print(f"  Normalized Cross-Correlation: {ncc:.4f}")
         
-        # Apply inverse transformation to segmentation
-        recovered_seg = vxm.layers.SpatialTransformer(interp_method='nearest', fill_value=0)((deformed_seg_normalized, inverse_def_field_vxm))
+        # Calculate volume similarity for segmentation
+        original_seg_vol = calculate_nifti_volume(output_filename)
+        recovered_seg_vol = calculate_nifti_volume(inverse_seg_def_moved)
+        seg_vol_similarity = recovered_seg_vol / original_seg_vol if original_seg_vol > 0 else 0
         
-        # Save the recovered segmentation using nibabel
-        recovered_seg_nii = nib.Nifti1Image(recovered_seg[0].numpy(), nib.load(seg_def_moved).affine)
-        nib.save(recovered_seg_nii, inverse_seg_def_moved)
-        print(f"Recovered segmentation saved to: {inverse_seg_def_moved}")
-        
-        # Calculate and save inverse Jacobian determinant
-        inverse_jac_det_path = jac_det_path.replace('.nii.gz', '_inverse.nii.gz')
-        inverse_jacobian_det = vxm.py.utils.jacobian_determinant(inverse_def_field_data)
-        inverse_jac_det_nii = nib.Nifti1Image(inverse_jacobian_det, affine_matrix)
-        nib.save(inverse_jac_det_nii, inverse_jac_det_path)
-        print(f"Inverse Jacobian determinant saved to: {inverse_jac_det_path}")
-        
-        # Calculate similarity metrics between original and recovered images
-        print(f'\n===== SIMILARITY ANALYSIS =====')
-        
-        # Load original and recovered images
-        original_img = sf.load_volume(subj_path)
-        recovered_img_vol = sf.load_volume(inverse_def_moved)
-        
-        # Ensure same shape for comparison
-        if original_img.shape != recovered_img_vol.shape:
-            print(f"Resampling recovered image to match original shape: {original_img.shape}")
-            recovered_img_vol = recovered_img_vol.resample_like(original_img, method='linear')
-        
-        # Calculate similarity metrics
-        from scipy.stats import pearsonr
-        from sklearn.metrics import mean_squared_error, mean_absolute_error
-        
-        # Flatten arrays for correlation calculation
-        orig_flat = original_img.data.flatten()
-        recov_flat = recovered_img_vol.data.flatten()
-        
-        # Remove any NaN values
-        valid_mask = ~(np.isnan(orig_flat) | np.isnan(recov_flat))
-        orig_clean = orig_flat[valid_mask]
-        recov_clean = recov_flat[valid_mask]
-        
-        if len(orig_clean) > 0:
-            # Pearson correlation
-            correlation, p_value = pearsonr(orig_clean, recov_clean)
-            
-            # Mean squared error
-            mse = mean_squared_error(orig_clean, recov_clean)
-            
-            # Mean absolute error
-            mae = mean_absolute_error(orig_clean, recov_clean)
-            
-            # Normalized cross-correlation
-            ncc = np.corrcoef(orig_clean, recov_clean)[0, 1]
-            
-            print(f"Similarity Metrics for {subj_id}:")
-            print(f"  Pearson Correlation: {correlation:.4f} (p-value: {p_value:.4f})")
-            print(f"  Mean Squared Error: {mse:.4f}")
-            print(f"  Mean Absolute Error: {mae:.4f}")
-            print(f"  Normalized Cross-Correlation: {ncc:.4f}")
-            
-            # Calculate volume similarity for segmentation
-            original_seg_vol = calculate_nifti_volume(output_filename)
-            recovered_seg_vol = calculate_nifti_volume(inverse_seg_def_moved)
-            seg_vol_similarity = recovered_seg_vol / original_seg_vol if original_seg_vol > 0 else 0
-            
-            print(f"  Segmentation Volume Similarity: {seg_vol_similarity:.4f}")
-            print(f"    Original Volume: {original_seg_vol:.2f} mm³")
-            print(f"    Recovered Volume: {recovered_seg_vol:.2f} mm³")
-        else:
-            print(f"Warning: No valid data for similarity calculation for {subj_id}")
+        print(f"  Segmentation Volume Similarity: {seg_vol_similarity:.4f}")
+        print(f"    Original Volume: {original_seg_vol:.2f} mm³")
+        print(f"    Recovered Volume: {recovered_seg_vol:.2f} mm³")
+    else:
+        print(f"Warning: No valid data for similarity calculation for {subj_id}")
 
 print(f"\n===== PIPELINE COMPLETED =====")
 print(f"All subjects processed successfully!")

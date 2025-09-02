@@ -21,11 +21,12 @@ RUN apt-get update && apt-get install -y \
     libgcc-s1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
-WORKDIR /app
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Clone the mri_pipeline repository
+RUN git clone https://github.com/akisg/mri_pipeline.git
+
+# Set working directory
+WORKDIR /mri_pipeline
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip
@@ -55,19 +56,15 @@ RUN pip install --no-cache-dir \
 
 
 # Download the model file
-curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/brains-dice-vel-0.5-res-16-256f.h5
-# curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/shapes-dice-vel-3-res-8-16-32-256f.h5
-
-# Copy the main script and model files
-COPY synthmorph_ravens_pipeline.py .
-COPY brains-dice-vel-0.5-res-16-256f.h5 .
+RUN curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/brains-dice-vel-0.5-res-16-256f.h5
+# RUN curl -O https://surfer.nmr.mgh.harvard.edu/ftp/data/voxelmorph/synthmorph/shapes-dice-vel-3-res-8-16-32-256f.h5
 
 # Create directories for inputs and outputs
 RUN mkdir -p inputs outputs
 
 # Set environment variables for the pipeline
-ENV INPUT_DIR=/app/inputs
-ENV OUTPUT_DIR=/app/outputs
+ENV INPUT_DIR=/mri_pipeline/inputs
+ENV OUTPUT_DIR=/mri_pipeline/outputs
 
 # Set default command
-CMD ["python", "synthmorph_ravens_pipeline.py"] 
+CMD ["python", "/mri_pipeline/synthmorph_ravens_pipeline.py"]
