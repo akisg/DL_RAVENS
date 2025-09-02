@@ -50,6 +50,9 @@ fi
 
 mkdir -p "$OUTDIR"
 
+PREPROC_SUBDIR="$OUTDIR/init/"
+
+
 # 0) Early resample/regrid: reshape to SHAPE and set voxel size to VOX_MM
 # Resample subject and template using dlravens_preprocessing.py
 ORIG_SUBJECT_ID=$(basename "$SUBJECT")
@@ -63,7 +66,7 @@ ORIG_SUBJECT_ID="${ORIG_SUBJECT_ID%_T1}"
 RESAMPLE_OUTPUT=$(python "$SCRIPT_DIR"/dlravens_preprocessing.py \
   --subject "$SUBJECT" \
   --template "$TEMPLATE" \
-  --outdir "$OUTDIR" \
+  --outdir "$PREPROC_SUBDIR" \
   --shape "$SHAPE" \
   --voxel-size "$VOX_MM" | cat)
 
@@ -82,7 +85,7 @@ TEMPLATE="$TEMPLATE_RESHAPED"
 echo "Submitting preprocessing job via sbatch (blocking until completion)..."
 mkdir -p "$SCRIPT_DIR"/logs
 sbatch --wait \
-  --output="$SCRIPT_DIR"/logs/slurm-%j.out \
+  --output="$SCRIPT_DIR"/logs/init-%j.out \
   --cpus-per-task=8 \
   --mem-per-cpu=4G \
   --time=06:00:00 \
@@ -96,17 +99,17 @@ sbatch --wait \
   --seg-method "$SEG_METHOD" \
   --target-roi "$TARGET_ROI" \
   "$SUBJECT" \
-  "$OUTDIR" \
+  "$PREPROC_SUBDIR" \
   "$ORIG_SUBJECT_ID"
 
 # Determine outputs from preprocessing (preserve original subject id)
 SUBJECT_ID="$ORIG_SUBJECT_ID"
-REORIENTED="$OUTDIR/${SUBJECT_ID}_T1_LPS.nii.gz"
-SEG_OUT_FAST="$OUTDIR/${SUBJECT_ID}_T1_LPS_fast_seg.nii.gz"
-SEG_OUT_SYNTHFS="$OUTDIR/${SUBJECT_ID}_T1_LPS_synthseg_freesurfer_seg.nii.gz"
-SEG_OUT_SYNTHGH="$OUTDIR/${SUBJECT_ID}_T1_LPS_synthseg_github_seg.nii.gz"
-SEG_OUT_DLICV="$OUTDIR/${SUBJECT_ID}_T1_LPS_dlicvmask.nii.gz"
-DLICV_OUT="$OUTDIR/${SUBJECT_ID}_T1_LPS_dlicv.nii.gz"
+REORIENTED="$PREPROC_SUBDIR/${SUBJECT_ID}_T1_LPS.nii.gz"
+SEG_OUT_FAST="$PREPROC_SUBDIR/${SUBJECT_ID}_T1_LPS_fast_seg.nii.gz"
+SEG_OUT_SYNTHFS="$PREPROC_SUBDIR/${SUBJECT_ID}_T1_LPS_synthseg_freesurfer_seg.nii.gz"
+SEG_OUT_SYNTHGH="$PREPROC_SUBDIR/${SUBJECT_ID}_T1_LPS_synthseg_github_seg.nii.gz"
+SEG_OUT_DLICV="$PREPROC_SUBDIR/${SUBJECT_ID}_T1_LPS_dlicvmask.nii.gz"
+DLICV_OUT="$PREPROC_SUBDIR/${SUBJECT_ID}_T1_LPS_dlicv.nii.gz"
 
 case "$SEG_METHOD" in
   fast) SUBJECT_SEG="$SEG_OUT_FAST" ;;
