@@ -1,4 +1,4 @@
-# mri_pipeline
+# DL_RAVENS
 
 ## Overview
 This repository contains an end‑to‑end MRI processing pipeline for brain T1 images. It performs preprocessing, brain masking and tissue segmentation, registration, and RAVENS (Regional Analysis of Volumes Examined in Normalized Space) analysis using either an ANTs-based workflow or a SynthMorph/VoxelMorph workflow.
