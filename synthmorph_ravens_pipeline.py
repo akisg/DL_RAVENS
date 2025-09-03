@@ -600,6 +600,7 @@ parser = argparse.ArgumentParser(description="Run Step 3 (Registration) for a si
 parser.add_argument("subject_image", help="Path to subject image (preprocessed to required shape, LPS)")
 parser.add_argument("subject_segmentation", help="Path to subject segmentation corresponding to subject_image")
 parser.add_argument("template_image", help="Path to template image (preprocessed to required shape, LPS)")
+parser.add_argument("--subject-id", dest="subject_id", required=True, help="Subject identifier to use for outputs (do not derive)")
 parser.add_argument("--seg-method", dest="seg_method", choices=["fast", "synthseg_freesurfer", "synthseg_github", "dlicv"], default=None, help="Segmentation method used to produce subject_segmentation (affects label mapping)")
 parser.add_argument("--target-roi", dest="target_roi", choices=["csf", "gray_matter", "white_matter", "background"], default=None, help="Target ROI for RAVENS mask creation")
 args = parser.parse_args()
@@ -620,8 +621,8 @@ print(f"Using segmentation method: {segmentation}")
 print(f"Target ROI: {target_roi}")
 print(f"Target labels: {target_labels}")
 
-subj_id = derive_subject_id(subject_image_path)
-print(f"Derived subject id: {subj_id}")
+subj_id = args.subject_id
+print(f"Using subject id: {subj_id}")
 
 
 # --- Step 3: Registration Loop ---

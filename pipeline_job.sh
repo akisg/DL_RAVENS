@@ -50,9 +50,6 @@ fi
 
 mkdir -p "$OUTDIR"
 
-PREPROC_SUBDIR="$OUTDIR/init/"
-
-
 # 0) Early resample/regrid: reshape to SHAPE and set voxel size to VOX_MM
 # Resample subject and template using dlravens_preprocessing.py
 ORIG_SUBJECT_ID=$(basename "$SUBJECT")
@@ -62,6 +59,9 @@ ORIG_SUBJECT_ID="${ORIG_SUBJECT_ID%.nii}"
 ORIG_SUBJECT_ID="${ORIG_SUBJECT_ID%_reshaped}"
 ORIG_SUBJECT_ID="${ORIG_SUBJECT_ID%_T1_LPS}"
 ORIG_SUBJECT_ID="${ORIG_SUBJECT_ID%_T1}"
+
+PREPROC_SUBDIR="$OUTDIR/init/${ORIG_SUBJECT_ID}/"
+
 
 RESAMPLE_OUTPUT=$(python "$SCRIPT_DIR"/dlravens_preprocessing.py \
   --subject "$SUBJECT" \
@@ -156,7 +156,8 @@ else
         "$SUBJECT_SEG" \
         "$TEMPLATE" \
         "$SEG_METHOD" \
-        "$TARGET_ROI"
+        "$TARGET_ROI" \
+        "$SUBJECT_ID"
   else
     # Submit CPU SynthMorph job
     sbatch --output="$SCRIPT_DIR"/logs/synthmorph-cpu-%j.out -- \
@@ -165,7 +166,8 @@ else
         "$SUBJECT_SEG" \
         "$TEMPLATE" \
         "$SEG_METHOD" \
-        "$TARGET_ROI"
+        "$TARGET_ROI" \
+        "$SUBJECT_ID"
   fi
 fi
 
